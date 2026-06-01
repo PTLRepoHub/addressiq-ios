@@ -1,0 +1,42 @@
+name: Release
+
+# iOS distribution:
+#  - Swift Package Manager: the git tag IS the release. Consumers point at
+#    https://github.com/PTLRepoHub/addressiq-ios.git and pin `from: "X.Y.Z"`.
+#    Pushing a tag requires no publish step.
+#  - CocoaPods: this workflow pushes the pod to trunk on each tag.
+#
+# Required secret: COCOAPODS_TRUNK_TOKEN.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (pod lib lint only)"
+        type: boolean
+        default: true
+
+jobs:
+  cocoapods:
+    name: Publish pod
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint / push
+        env:
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            export POD_VERSION="${GITHUB_REF_NAME#v}"; DRY="false"
+          else
+            export POD_VERSION="0.0.0"; DRY="${{ github.event.inputs.dry_run }}"
+          fi
+          if [ "$DRY" = "true" ]; then
+            pod lib lint AddressIQ.podspec --allow-warnings
+          else
+            pod trunk push AddressIQ.podspec --allow-warnings
+          fi
+      - name: SwiftPM note
+        run: echo "SwiftPM consumers resolve the git tag v${GITHUB_REF_NAME#v} directly — no publish needed."

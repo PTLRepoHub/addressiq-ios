@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcresult
+Pods/
+*.xcuserstate
+example/.build/
+example/.swiftpm/

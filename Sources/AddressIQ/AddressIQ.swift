@@ -1,0 +1,509 @@
+//
+// AddressIQ.swift — public singleton (Phase 3 SDK runtime).
+//
+// Mirrors the RN + Flutter SDKs at the public-method level:
+//   AddressIQ.shared.initialize(config:)
+//   AddressIQ.shared.setUser(_:)
+//   AddressIQ.shared.startPhysical(_:) async throws -> StartPhysicalResult
+//   AddressIQ.shared.startCombined(_:) async throws -> StartCombinedResult
+//   AddressIQ.shared.cancelVerification(code:)
+//   AddressIQ.shared.pauseVerification() / resumeVerification() / sync() / logout() / reset()
+//   AddressIQ.shared.getVerificationState() / getPermissionState()
+//
+// Wire types and HTTP clients are generated from the OpenAPI + protobuf
+// specs in CI (Phase 3 §protobuf-codegen). The structs below shape the
+// public surface; the generated code drops into Generated/.
+
+import Foundation
+import CoreLocation
+import Combine
+#if canImport(UIKit)
+import UIKit
+#endif
+
+public enum AddressIQLifecycleState: String {
+    case uninitialized
+    case idle
+    case collecting
+    case paused
+    case terminated
+}
+
+public struct AddressIQConfig {
+    public let apiKey: String
+    public let environment: AddressIQEnvironment
+    /// Optional override for the API base URL. Production integrations
+    /// should leave this nil — the SDK resolves the right URL from
+    /// `environment`. Override only when routing through a partner
+    /// proxy or running against a hermetic test backend.
+    public let apiUrl: URL?
+
+    public init(
+        apiKey: String,
+        environment: AddressIQEnvironment = .production,
+        apiUrl: URL? = nil
+    ) {
+        self.apiKey = apiKey
+        self.environment = environment
+        self.apiUrl = apiUrl
+    }
+
+    /// Effective API URL: explicit override if provided, otherwise the
+    /// env default.
+    public var resolvedApiUrl: URL {
+        return apiUrl ?? environment.defaultApiUrl
+    }
+}
+
+public enum AddressIQEnvironment: String {
+    case sandbox
+    case production
+
+    /// Public API base URL the SDK resolves to when no override is set.
+    public var defaultApiUrl: URL {
+        switch self {
+        case .production:
+            return URL(string: "https://api.addressiqpro.com")!
+        case .sandbox:
+            return URL(string: "https://api-staging.addressiqpro.com")!
+        }
+    }
+}
+
+public struct SDKUser {
+    public let appUserId: String
+    public let phone: String?
+    public let email: String?
+    public let firstName: String?
+    public let lastName: String?
+
+    public init(appUserId: String, phone: String? = nil, email: String? = nil, firstName: String? = nil, lastName: String? = nil) {
+        self.appUserId = appUserId
+        self.phone = phone
+        self.email = email
+        self.firstName = firstName
+        self.lastName = lastName
+    }
+}
+
+public struct VerificationLifecycleState {
+    public let state: AddressIQLifecycleState
+    public let appUserId: String?
+    public let verificationId: String?
+    public let locationCode: String?
+    public let pausedFor: TimeInterval?
+}
+
+public enum AddressIQError: Error, CustomStringConvertible {
+    case notInitialized
+    case noActiveSession
+    case http(status: Int, code: String?, message: String?)
+    case providerError(code: String, message: String)
+
+    public var description: String {
+        switch self {
+        case .notInitialized: return "AddressIQ.shared.initialize must be called first"
+        case .noActiveSession: return "No active verification session"
+        case let .http(status, code, message):
+            return "AddressIQ HTTP \(status) \(code ?? "")\(message.map { ": \($0)" } ?? "")"
+        case let .providerError(code, message):
+            return "AddressIQ provider error \(code): \(message)"
+        }
+    }
+}
+
+public struct StartPhysicalArgs {
+    public let locationCode: String
+    public let provider: String
+    public let agentId: String?
+    public let slaHours: Int?
+    public let metadata: [String: Any]?
+    public let idempotencyKey: String?
+    public let branchId: String?
+
+    public init(
+        locationCode: String,
+        provider: String,
+        agentId: String? = nil,
+        slaHours: Int? = nil,
+        metadata: [String: Any]? = nil,
+        idempotencyKey: String? = nil,
+        branchId: String? = nil
+    ) {
+        self.locationCode = locationCode
+        self.provider = provider
+        self.agentId = agentId
+        self.slaHours = slaHours
+        self.metadata = metadata
+        self.idempotencyKey = idempotencyKey
+        self.branchId = branchId
+    }
+}
+
+public struct StartCombinedArgs {
+    public let locationCode: String
+    public let digitalProvider: String?
+    public let physicalProvider: String
+    public let startDigital: Bool
+    public let agentId: String?
+    public let slaHours: Int?
+    public let metadata: [String: Any]?
+    public let idempotencyKey: String?
+    public let branchId: String?
+
+    public init(
+        locationCode: String,
+        physicalProvider: String,
+        digitalProvider: String? = nil,
+        startDigital: Bool = true,
+        agentId: String? = nil,
+        slaHours: Int? = nil,
+        metadata: [String: Any]? = nil,
+        idempotencyKey: String? = nil,
+        branchId: String? = nil
+    ) {
+        self.locationCode = locationCode
+        self.digitalProvider = digitalProvider
+        self.physicalProvider = physicalProvider
+        self.startDigital = startDigital
+        self.agentId = agentId
+        self.slaHours = slaHours
+        self.metadata = metadata
+        self.idempotencyKey = idempotencyKey
+        self.branchId = branchId
+    }
+}
+
+public final class AddressIQ {
+    public static let shared = AddressIQ()
+
+    private let queue = DispatchQueue(label: "com.addressiq.sdk", attributes: .concurrent)
+    private var config: AddressIQConfig?
+    private var user: SDKUser?
+    private var state: AddressIQLifecycleState = .uninitialized
+    private var activeVerificationId: String?
+    private var activeLocationCode: String?
+    private var pausedAt: Date?
+    private lazy var locationManager: AddressIQLocationManager = .init()
+    private let stateSubject = CurrentValueSubject<VerificationLifecycleState, Never>(
+        VerificationLifecycleState(
+            state: .uninitialized,
+            appUserId: nil,
+            verificationId: nil,
+            locationCode: nil,
+            pausedFor: nil
+        )
+    )
+
+    /// Combine publisher that emits the current lifecycle state on every
+    /// transition. Drives partner UIs.
+    public var statePublisher: AnyPublisher<VerificationLifecycleState, Never> {
+        stateSubject.eraseToAnyPublisher()
+    }
+
+    private init() {}
+
+    private func emitState() {
+        stateSubject.send(getVerificationState())
+    }
+
+    // MARK: - Lifecycle
+
+    public func initialize(config: AddressIQConfig) {
+        queue.async(flags: .barrier) {
+            self.config = config
+            self.state = .idle
+            self.emitState()
+        }
+        // Register the BGTaskScheduler handler so iOS can wake us for telemetry
+        // flushes. Partners still need to declare the task identifier in their
+        // Info.plist — see Phase 3 §iOS.
+        AddressIQBackgroundScheduler.shared.register {
+            await self.flushTelemetryQueue()
+        }
+    }
+
+    private func flushTelemetryQueue() async {
+        let batch = AddressIQTelemetryQueue.shared.dequeue(batchSize: 50)
+        guard !batch.isEmpty, let config else { return }
+        let payload = batch.map { $0.payload }.joined(separator: ",")
+        let body = "{\"events\":[\(payload)]}"
+        var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent("/v1/transit-events/batch"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        request.httpBody = body.data(using: .utf8)
+        if let (_, response) = try? await URLSession.shared.data(for: request),
+           (response as? HTTPURLResponse)?.statusCode == 200
+        {
+            AddressIQTelemetryQueue.shared.acknowledge(rowIds: batch.map { $0.id })
+        }
+    }
+
+    public func setUser(_ user: SDKUser) async throws {
+        try requireInitialized()
+        try await pauseVerification()
+        queue.async(flags: .barrier) {
+            self.user = user
+            if self.state == .uninitialized || self.state == .terminated {
+                self.state = .idle
+            }
+            self.emitState()
+        }
+        // Persist appUserId for crash-recovery so a relaunched app can resume
+        // the right session after `setUser` is called again.
+        AddressIQKeychain.shared.set(user.appUserId, for: "appUserId")
+    }
+
+    public func pauseVerification() async throws {
+        guard state == .collecting else { return }
+        queue.async(flags: .barrier) {
+            self.pausedAt = Date()
+            self.state = .paused
+            self.emitState()
+        }
+        locationManager.stopMonitoring()
+    }
+
+    public func resumeVerification() async throws {
+        guard state == .paused else { return }
+        guard activeVerificationId != nil, activeLocationCode != nil else {
+            throw AddressIQError.noActiveSession
+        }
+        queue.async(flags: .barrier) {
+            self.pausedAt = nil
+            self.state = .collecting
+            self.emitState()
+        }
+    }
+
+    @discardableResult
+    public func sync() async throws -> Int {
+        let before = AddressIQTelemetryQueue.shared.count()
+        await flushTelemetryQueue()
+        let after = AddressIQTelemetryQueue.shared.count()
+        return max(0, before - after)
+    }
+
+    public func logout() async throws {
+        try? await pauseVerification()
+        if let user, let config {
+            var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent("/api/v1/sdk/session"))
+            request.httpMethod = "DELETE"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+            let body: [String: Any] = [
+                "appUserId": user.appUserId,
+                "verificationCode": activeVerificationId as Any,
+            ].compactMapValues { $0 }
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            _ = try? await URLSession.shared.data(for: request)
+        }
+        queue.async(flags: .barrier) {
+            self.user = nil
+            self.activeVerificationId = nil
+            self.activeLocationCode = nil
+            self.pausedAt = nil
+            self.state = .terminated
+            self.emitState()
+        }
+        AddressIQKeychain.shared.wipeAll()
+        AddressIQTelemetryQueue.shared.wipe()
+    }
+
+    public func reset() async {
+        queue.async(flags: .barrier) {
+            self.user = nil
+            self.activeVerificationId = nil
+            self.activeLocationCode = nil
+            self.pausedAt = nil
+            self.state = .uninitialized
+            self.config = nil
+            self.emitState()
+        }
+        AddressIQKeychain.shared.wipeAll()
+        AddressIQTelemetryQueue.shared.wipe()
+    }
+
+    public func getVerificationState() -> VerificationLifecycleState {
+        var snapshot: VerificationLifecycleState!
+        queue.sync {
+            snapshot = VerificationLifecycleState(
+                state: state,
+                appUserId: user?.appUserId,
+                verificationId: activeVerificationId,
+                locationCode: activeLocationCode,
+                pausedFor: pausedAt.map { Date().timeIntervalSince($0) }
+            )
+        }
+        return snapshot
+    }
+
+    // MARK: - Verification surface
+
+    /// Start a physical address verification. A partner-provided agent
+    /// or KYC provider visits the address to confirm residency.
+    public func startPhysicalVerification(_ args: StartPhysicalArgs) async throws -> [String: Any] {
+        let config = try requireInitialized()
+        let url = config.resolvedApiUrl.appendingPathComponent(
+            "/api/v1/locations/\(args.locationCode)/verifications/physical"
+        )
+        var body: [String: Any] = ["provider": args.provider]
+        if let agentId = args.agentId { body["agentId"] = agentId }
+        if let slaHours = args.slaHours { body["slaHours"] = slaHours }
+        if let metadata = args.metadata { body["metadata"] = metadata }
+        return try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+    }
+
+    /// Start a combined digital + physical verification. Digital runs
+    /// first via the AI provider (uses SDK telemetry to score residency);
+    /// physical fallback fires if the digital half resolves to UNKNOWN.
+    public func startDigitalAndPhysicalVerification(_ args: StartCombinedArgs) async throws -> [String: Any] {
+        let config = try requireInitialized()
+        let url = config.resolvedApiUrl.appendingPathComponent(
+            "/api/v1/locations/\(args.locationCode)/verifications/combined"
+        )
+        var body: [String: Any] = [
+            "physicalProvider": args.physicalProvider,
+            "startDigital": args.startDigital,
+        ]
+        if let digitalProvider = args.digitalProvider { body["digitalProvider"] = digitalProvider }
+        if let agentId = args.agentId { body["agentId"] = agentId }
+        if let slaHours = args.slaHours { body["slaHours"] = slaHours }
+        if let metadata = args.metadata { body["metadata"] = metadata }
+        return try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+    }
+
+
+    public func cancelVerification(_ code: String, idempotencyKey: String? = nil) async throws -> [String: Any] {
+        let config = try requireInitialized()
+        let url = config.resolvedApiUrl.appendingPathComponent("/api/v1/verifications/\(code)/cancel")
+        return try await post(url, body: [:], idempotencyKey: idempotencyKey, branchId: nil)
+    }
+
+    public func listProviders(type: String? = nil) async throws -> [[String: Any]] {
+        let config = try requireInitialized()
+        let path = "/api/v1/providers" + (type.map { "?type=\($0)" } ?? "")
+        var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent(path))
+        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode < 400 else {
+            throw AddressIQError.http(status: (response as? HTTPURLResponse)?.statusCode ?? 0, code: nil, message: nil)
+        }
+        return (try JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+    }
+
+    // MARK: - Permission orchestration
+    //
+    // Cross-SDK contract §0 (Permission Trigger Ownership): the app
+    // decides *when* verification begins; the SDK owns every step after
+    // that. The methods below delegate to `AddressIQPermissionRequester`
+    // so the singleton stays focused on lifecycle.
+
+    /// Read-only permission snapshot. Cross-SDK shape:
+    /// `{ foregroundLocation, backgroundLocation, notifications }` with
+    /// values from `{GRANTED, DENIED, NOT_DETERMINED, BLOCKED, UNAVAILABLE}`.
+    public func getPermissionState() -> [String: String] {
+        AddressIQPermissionRequester.shared.getPermissionState()
+    }
+
+    /// Drive the OS permission prompts and return the final state.
+    /// Two-stage sequencing: `requestWhenInUseAuthorization` →
+    /// `requestAlwaysAuthorization` (only when stage 1 grants),
+    /// plus parallel `UNUserNotificationCenter.requestAuthorization`.
+    /// iOS silently no-ops "Always" without "WhenInUse" — sequencing
+    /// matters.
+    public func requestPermissions() async -> [String: String] {
+        await AddressIQPermissionRequester.shared.requestPermissions()
+    }
+
+    /// Whether the SDK can still trigger the OS prompt for the given
+    /// scope. Returns `true` only while the OS status is
+    /// `.notDetermined`. Use to decide between rationale UI (when
+    /// prompting is possible) and a Settings deep-link (when not).
+    public func canRequestPermission(scope: PermissionScope) -> Bool {
+        AddressIQPermissionRequester.shared.canRequestPermission(scope: scope)
+    }
+
+    /// Deep-link to the host app's Settings page so the user can
+    /// re-enable a `.denied` permission. iOS will not re-prompt until
+    /// they toggle the grant manually.
+    public func openSettings() async -> Bool {
+        await AddressIQPermissionRequester.shared.openSettings()
+    }
+
+    // MARK: - Internal helpers
+
+    public func markActiveSession(locationCode: String, verificationId: String) {
+        queue.async(flags: .barrier) {
+            self.activeLocationCode = locationCode
+            self.activeVerificationId = verificationId
+            self.state = .collecting
+            self.pausedAt = nil
+            self.emitState()
+        }
+        AddressIQBackgroundScheduler.shared.schedule()
+    }
+
+    private func requireInitialized() throws -> AddressIQConfig {
+        guard let config = self.config else { throw AddressIQError.notInitialized }
+        return config
+    }
+
+    private func post(
+        _ url: URL,
+        body: [String: Any],
+        idempotencyKey: String?,
+        branchId: String?
+    ) async throws -> [String: Any] {
+        let config = try requireInitialized()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue(idempotencyKey ?? Self.makeIdempotencyKey(), forHTTPHeaderField: "idempotency-key")
+        if let branchId { request.setValue(branchId, forHTTPHeaderField: "x-branch-id") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        if status >= 400 {
+            throw AddressIQError.http(
+                status: status,
+                code: json["code"] as? String,
+                message: json["message"] as? String
+            )
+        }
+        return json
+    }
+
+    private static func makeIdempotencyKey() -> String {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(16)
+        return "iqidem_ios_\(token)"
+    }
+}
+
+/// Wraps CLLocationManager + geofence registration. Phase 3 ships the
+/// public surface; the per-region monitoring details are filled in
+/// alongside the protobuf-aligned telemetry envelope (P3.7).
+final class AddressIQLocationManager: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+
+    func startMonitoring(latitude: Double, longitude: Double, radius: Double, identifier: String) {
+        let region = CLCircularRegion(
+            center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+            radius: radius,
+            identifier: identifier
+        )
+        region.notifyOnEntry = true
+        region.notifyOnExit = true
+        manager.startMonitoring(for: region)
+    }
+
+    func stopMonitoring() {
+        for region in manager.monitoredRegions {
+            manager.stopMonitoring(for: region)
+        }
+    }
+}

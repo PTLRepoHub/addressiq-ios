@@ -1,0 +1,31 @@
+import Foundation
+
+/// In-flight address being collected through the verify flow. Held in
+/// `@State` on the orchestrator so SwiftUI manages the form state.
+public struct AddressDraft: Equatable {
+    public var lat: Double?
+    public var lon: Double?
+    public var formattedAddress: String?
+    public var propertyNumber: String?
+    public var streetName: String?
+    public var buildingColor: String?
+    public var directions: String?
+
+    public init(
+        lat: Double? = nil,
+        lon: Double? = nil,
+        formattedAddress: String? = nil,
+        propertyNumber: String? = nil,
+        streetName: String? = nil,
+        buildingColor: String? = nil,
+        directions: String? = nil
+    ) {
+        self.lat = lat
+        self.lon = lon
+        self.formattedAddress = formattedAddress
+        self.propertyNumber = propertyNumber
+        self.streetName = streetName
+        self.buildingColor = buildingColor
+        self.directions = directions
+    }
+}

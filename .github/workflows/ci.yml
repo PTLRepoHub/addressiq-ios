@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sdk:
+    name: SDK · build + test (iOS Simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + test
+        run: |
+          xcodebuild test \
+            -scheme AddressIQ \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            CODE_SIGNING_ALLOWED=NO
+
+  example:
+    name: Example · build (local SDK)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: example
+    steps:
+      - uses: actions/checkout@v4
+      # Consumes the local SDK via `.package(path: "..")`.
+      - name: Build
+        run: |
+          xcodebuild build \
+            -scheme AddressIQSample \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO
