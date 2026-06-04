@@ -6,3 +6,7 @@ Pods/
 *.xcuserstate
 example/.build/
 example/.swiftpm/
+
+# SwiftPM resolved versions — not pinned for a library
+Package.resolved
+/.build

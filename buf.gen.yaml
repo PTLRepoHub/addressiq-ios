@@ -1,0 +1,15 @@
+version: v2
+# Wire contract source — see PTLRepoHub/AddressIq-proto. Swap to
+#   inputs: [ { module: buf.build/addressiq/addressiq } ]
+# once the BSR module is published.
+inputs:
+  - git_repo: https://github.com/PTLRepoHub/AddressIq-proto.git
+    branch: main
+plugins:
+  # Swift bindings. google.protobuf well-known types come from the
+  # SwiftProtobuf runtime (declared in Package.swift), so they are NOT
+  # generated here.
+  - remote: buf.build/apple/swift:v1.38.0
+    out: Sources/AddressIQ/Generated
+    opt:
+      - Visibility=Public

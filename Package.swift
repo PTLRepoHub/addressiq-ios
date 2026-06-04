@@ -16,10 +16,17 @@ let package = Package(
             targets: ["AddressIQ"]
         ),
     ],
+    dependencies: [
+        // Runtime for the generated wire-contract bindings under
+        // Sources/AddressIQ/Generated (source: PTLRepoHub/AddressIq-proto).
+        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.38.0"),
+    ],
     targets: [
         .target(
             name: "AddressIQ",
-            dependencies: [],
+            dependencies: [
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ],
             path: "Sources/AddressIQ"
         ),
         .testTarget(
