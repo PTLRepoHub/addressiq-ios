@@ -19,6 +19,7 @@ public struct AddressIQVerifyView: View {
     let firstName: String?
     let lastName: String?
     let email: String?
+    let googleMapsApiKey: String?
     let theme: AddressIQThemeOverrides?
     let privacyPolicyUrl: URL?
     let termsUrl: URL?
@@ -34,6 +35,7 @@ public struct AddressIQVerifyView: View {
         firstName: String? = nil,
         lastName: String? = nil,
         email: String? = nil,
+        googleMapsApiKey: String? = nil,
         theme: AddressIQThemeOverrides? = nil,
         privacyPolicyUrl: URL? = nil,
         termsUrl: URL? = nil,
@@ -48,6 +50,7 @@ public struct AddressIQVerifyView: View {
         self.firstName = firstName
         self.lastName = lastName
         self.email = email
+        self.googleMapsApiKey = googleMapsApiKey
         self.theme = theme
         self.privacyPolicyUrl = privacyPolicyUrl
         self.termsUrl = termsUrl
@@ -65,6 +68,7 @@ public struct AddressIQVerifyView: View {
             firstName: firstName,
             lastName: lastName,
             email: email,
+            googleMapsApiKey: googleMapsApiKey,
             privacyPolicyUrl: privacyPolicyUrl,
             termsUrl: termsUrl,
             onCompleted: onCompleted,
@@ -75,12 +79,18 @@ public struct AddressIQVerifyView: View {
     }
 }
 
-/// Result delivered to the partner via `onCompleted`. Mirrors the
-/// Android `AddressIQVerifyResult.Completed` shape.
+/// Result delivered to the partner via `onCompleted`.
+///
+/// The Collect UI **collects only** — it saves the address and returns its
+/// `locationCode`. It does NOT start a verification. Start verification from the
+/// `onCompleted` callback with `AddressIQ.shared.startVerification(...)`.
+/// Mirrors the cross-SDK `CollectResult` shape.
 public struct AddressIQVerifyResult: Equatable {
-    public let verificationId: String
-    public let locationId: String
-    public let status: String
+    public let locationCode: String
+    public let formattedAddress: String?
+    public let lat: Double
+    public let lon: Double
+    public let placeId: String?
 }
 
 /// Typed error delivered via `onFailed`. Code maps to the cross-SDK

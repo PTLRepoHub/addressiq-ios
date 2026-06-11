@@ -10,6 +10,10 @@ public struct AddressDraft: Equatable {
     public var streetName: String?
     public var buildingColor: String?
     public var directions: String?
+    // Map-flow fields (Places autocomplete + Street View pin-confirm).
+    public var placeId: String?
+    public var streetviewPanoId: String?
+    public var streetviewHeading: Double?
 
     public init(
         lat: Double? = nil,
@@ -18,7 +22,10 @@ public struct AddressDraft: Equatable {
         propertyNumber: String? = nil,
         streetName: String? = nil,
         buildingColor: String? = nil,
-        directions: String? = nil
+        directions: String? = nil,
+        placeId: String? = nil,
+        streetviewPanoId: String? = nil,
+        streetviewHeading: Double? = nil
     ) {
         self.lat = lat
         self.lon = lon
@@ -27,5 +34,8 @@ public struct AddressDraft: Equatable {
         self.streetName = streetName
         self.buildingColor = buildingColor
         self.directions = directions
+        self.placeId = placeId
+        self.streetviewPanoId = streetviewPanoId
+        self.streetviewHeading = streetviewHeading
     }
 }

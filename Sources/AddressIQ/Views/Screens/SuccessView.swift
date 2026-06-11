@@ -2,7 +2,7 @@ import SwiftUI
 
 @available(iOS 15.0, *)
 struct SuccessView: View {
-    let verificationId: String
+    let locationCode: String
     let onDone: () -> Void
 
     @Environment(\.addressIQTheme) private var theme
@@ -22,10 +22,10 @@ struct SuccessView: View {
                 Spacer().frame(height: 28)
 
                 VStack(spacing: 10) {
-                    Text("Verification Started")
+                    Text("Address Collected")
                         .font(.system(size: 26, weight: .heavy))
                         .foregroundColor(theme.text)
-                    Text("We're now verifying your address. This typically takes 2-7 days. You'll be notified when it's complete.")
+                    Text("Your address has been saved. We'll verify you live there once verification starts.")
                         .font(.system(size: 15))
                         .foregroundColor(theme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -35,7 +35,7 @@ struct SuccessView: View {
 
                     HStack(spacing: 10) {
                         Image(systemName: "lightbulb").font(.system(size: 20)).foregroundColor(theme.primary)
-                        Text("Keep your location services turned on and don't force-close this app for the best results")
+                        Text("Keep your location services turned on so verification can confirm you live here")
                             .font(.system(size: 13))
                             .foregroundColor(theme.text)
                     }
@@ -44,7 +44,7 @@ struct SuccessView: View {
                     .background(theme.primaryLight)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                    Text("Reference: \(verificationId)")
+                    Text("Reference: \(locationCode)")
                         .font(.system(size: 11).monospaced())
                         .foregroundColor(theme.textSecondary)
                         .padding(.top, 18)

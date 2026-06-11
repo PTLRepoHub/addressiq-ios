@@ -1,116 +1,281 @@
 import SwiftUI
 import CoreLocation
+import MapKit
 
+/// Address capture for the Collect UI.
+///
+/// Map flow (when a Google Maps key is configured): current location / Places
+/// Autocomplete → MapKit map with a centre pin → auto-derived (read-only)
+/// formatted address → Street View pin-confirm where coverage exists. Falls back
+/// to GPS + a manual formatted-address field when no key is available.
 @available(iOS 15.0, *)
 struct AddressView: View {
     let initial: AddressDraft
+    /// Google Maps API key (enables the map flow). When nil → manual entry.
+    let googleMapsApiKey: String?
     let onNext: (AddressDraft) -> Void
     let onCancel: () -> Void
 
     @Environment(\.addressIQTheme) private var theme
-    @State private var lat: Double?
-    @State private var lon: Double?
-    @State private var accuracy: Double = 0
-    @State private var formatted: String
-    @State private var loading: Bool = false
-    @State private var locationDelegate: LocationOneShot?
 
-    init(initial: AddressDraft, onNext: @escaping (AddressDraft) -> Void, onCancel: @escaping () -> Void) {
+    @State private var region: MKCoordinateRegion
+    @State private var formatted: String
+    @State private var placeId: String?
+    @State private var hasPoint: Bool
+    @State private var loading = false
+    @State private var resolving = false
+    @State private var query = ""
+    @State private var suggestions: [PlaceSuggestion] = []
+    @State private var showStreetView = false
+    @State private var svPanoId: String?
+    @State private var locationDelegate: LocationOneShot?
+    @State private var geocodeTask: Task<Void, Never>?
+    @State private var suppressNextGeocode = false
+
+    private let sessionToken = UUID().uuidString
+
+    init(initial: AddressDraft, googleMapsApiKey: String?, onNext: @escaping (AddressDraft) -> Void, onCancel: @escaping () -> Void) {
         self.initial = initial
+        self.googleMapsApiKey = googleMapsApiKey
         self.onNext = onNext
         self.onCancel = onCancel
-        _lat = State(initialValue: initial.lat)
-        _lon = State(initialValue: initial.lon)
+        let center = CLLocationCoordinate2D(latitude: initial.lat ?? 6.5244, longitude: initial.lon ?? 3.3792)
+        _region = State(initialValue: MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
         _formatted = State(initialValue: initial.formattedAddress ?? "")
+        _placeId = State(initialValue: initial.placeId)
+        _hasPoint = State(initialValue: initial.lat != nil && initial.lon != nil)
     }
 
-    var canContinue: Bool { lat != nil && lon != nil && !formatted.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var mapsKey: String? {
+        guard let k = googleMapsApiKey, !k.isEmpty else { return nil }
+        return k
+    }
+
+    private var centerKey: String {
+        String(format: "%.5f,%.5f", region.center.latitude, region.center.longitude)
+    }
+
+    private var canContinue: Bool { hasPoint && !formatted.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         ScreenScaffold(
             title: "Confirm your address",
-            subtitle: "We'll use your current location and the address you enter to verify where you live.",
+            subtitle: "Search for your address or drop a pin on the map. We'll use this to verify where you live.",
             step: 0,
             totalSteps: 3,
             onClose: onCancel,
-            content: {
-                VStack(alignment: .leading, spacing: 0) {
-                    // GPS card
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "location.north.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(theme.primary)
-                            Text("CURRENT LOCATION")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(theme.textSecondary)
-                        }
-                        if loading {
-                            HStack(spacing: 10) {
-                                ProgressView().tint(theme.primary)
-                                Text("Reading GPS…").font(.system(size: 13)).foregroundColor(theme.textSecondary)
-                            }
-                        } else if let lat = lat, let lon = lon {
-                            Text(String(format: "%.6f, %.6f", lat, lon))
-                                .font(.system(size: 16, weight: .bold).monospaced())
-                                .foregroundColor(theme.text)
-                            if accuracy > 0 {
-                                Text("±\(Int(accuracy)) m accuracy")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(theme.textSecondary)
-                            }
-                            Button(action: captureLocation) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise").font(.system(size: 12))
-                                    Text("Read again").font(.system(size: 13, weight: .semibold))
-                                }
-                                .foregroundColor(theme.primary)
-                            }
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(theme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: theme.borderRadiusLg).stroke(theme.border, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: theme.borderRadiusLg))
-
-                    Spacer().frame(height: 18)
-
-                    Text("Formatted address")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(theme.text)
-                    Spacer().frame(height: 6)
-                    TextEditor(text: $formatted)
-                        .font(.system(size: 15))
-                        .foregroundColor(theme.inputText)
-                        .hiddenScrollBackground()
-                        .background(theme.inputBg)
-                        .frame(minHeight: 80)
-                        .padding(.horizontal, 8)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.inputBorder, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                    Spacer().frame(height: 8)
-                    Text("Enter your address exactly as it should appear on official records. The next screen captures property details.")
-                        .font(.system(size: 12))
-                        .foregroundColor(theme.textSecondary)
-                }
-                .onAppear { if lat == nil { captureLocation() } }
-            },
+            content: { content },
             footer: {
                 AddressIQButton(
-                    title: "Continue",
-                    action: {
-                        var draft = initial
-                        draft.lat = lat
-                        draft.lon = lon
-                        draft.formattedAddress = formatted.trimmingCharacters(in: .whitespaces)
-                        onNext(draft)
-                    },
-                    enabled: canContinue
+                    title: resolving ? "Loading…" : "Continue",
+                    action: onContinue,
+                    enabled: canContinue && !resolving
                 )
             }
         )
+        .fullScreenCover(isPresented: $showStreetView) {
+            if let key = mapsKey {
+                StreetViewScreen(
+                    apiKey: key,
+                    lat: region.center.latitude,
+                    lon: region.center.longitude,
+                    panoId: svPanoId,
+                    onConfirm: { pano in svPanoId = pano; showStreetView = false; finish() },
+                    onBack: { showStreetView = false },
+                    onCancel: onCancel
+                )
+                .environment(\.addressIQTheme, theme)
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if mapsKey != nil {
+                searchBar
+                if !suggestions.isEmpty { suggestionList }
+            }
+            mapOrLoading
+            Button(action: captureLocation) {
+                HStack(spacing: 6) {
+                    Image(systemName: "location.north.fill").font(.system(size: 12))
+                    Text("Use my current location").font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(theme.primary)
+            }
+            Text("Formatted address").font(.system(size: 14, weight: .semibold)).foregroundColor(theme.text)
+            addressField
+            Text("The next screen captures property details (house number, building color, directions).")
+                .font(.system(size: 12)).foregroundColor(theme.textSecondary)
+        }
+        .onAppear { if !hasPoint { captureLocation() } }
+        .onChange(of: centerKey) { _ in scheduleReverseGeocode() }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundColor(theme.textSecondary)
+            TextField("Search your address", text: $query)
+                .font(.system(size: 15)).foregroundColor(theme.text)
+                .onChange(of: query) { _ in onSearchChange() }
+        }
+        .padding(.horizontal, 12).frame(height: 46)
+        .background(theme.surface)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.border, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var suggestionList: some View {
+        VStack(spacing: 0) {
+            ForEach(suggestions) { s in
+                Button(action: { pickSuggestion(s) }) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.primaryText).font(.system(size: 14, weight: .semibold)).foregroundColor(theme.text)
+                        if let sub = s.secondaryText {
+                            Text(sub).font(.system(size: 12)).foregroundColor(theme.textSecondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 11)
+                }
+            }
+        }
+        .background(theme.surface)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.border, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder private var mapOrLoading: some View {
+        if loading {
+            HStack(spacing: 10) {
+                ProgressView().tint(theme.primary)
+                Text("Reading GPS…").font(.system(size: 13)).foregroundColor(theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity).frame(height: 120)
+            .background(theme.surface)
+            .overlay(RoundedRectangle(cornerRadius: theme.borderRadiusLg).stroke(theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: theme.borderRadiusLg))
+        } else {
+            ZStack {
+                Map(coordinateRegion: $region)
+                    .frame(height: 220)
+                Image(systemName: "mappin")
+                    .font(.system(size: 30))
+                    .foregroundColor(theme.primary)
+                    .offset(y: -15)
+            }
+            .overlay(RoundedRectangle(cornerRadius: theme.borderRadiusLg).stroke(theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: theme.borderRadiusLg))
+        }
+    }
+
+    @ViewBuilder private var addressField: some View {
+        if mapsKey != nil {
+            // Auto-derived, read-only.
+            HStack {
+                if resolving {
+                    ProgressView().tint(theme.primary)
+                } else {
+                    Text(formatted.isEmpty ? "Move the pin or search to set your address." : formatted)
+                        .font(.system(size: 15)).foregroundColor(theme.text)
+                }
+                Spacer()
+            }
+            .padding(14).frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(theme.surfaceSecondary)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            // No key → manual entry fallback.
+            TextEditor(text: $formatted)
+                .font(.system(size: 15)).foregroundColor(theme.inputText)
+                .hiddenScrollBackground().background(theme.inputBg)
+                .frame(minHeight: 70).padding(.horizontal, 8)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.inputBorder, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    // ── Actions ──
+
+    private func onContinue() {
+        guard hasPoint else { return }
+        if let key = mapsKey {
+            resolving = true
+            Task {
+                let cov = await MapsClient(apiKey: key).streetViewCoverage(region.center.latitude, region.center.longitude)
+                await MainActor.run {
+                    resolving = false
+                    if cov.available {
+                        svPanoId = cov.panoId
+                        showStreetView = true
+                    } else {
+                        finish()
+                    }
+                }
+            }
+        } else {
+            finish()
+        }
+    }
+
+    private func finish() {
+        var draft = initial
+        draft.lat = region.center.latitude
+        draft.lon = region.center.longitude
+        draft.formattedAddress = formatted.trimmingCharacters(in: .whitespaces)
+        draft.placeId = placeId
+        draft.streetviewPanoId = svPanoId
+        onNext(draft)
+    }
+
+    private func onSearchChange() {
+        guard let key = mapsKey, query.trimmingCharacters(in: .whitespaces).count >= 3 else {
+            suggestions = []
+            return
+        }
+        Task {
+            let out = await MapsClient(apiKey: key).autocomplete(query, sessionToken: sessionToken)
+            await MainActor.run { suggestions = out }
+        }
+    }
+
+    private func pickSuggestion(_ s: PlaceSuggestion) {
+        query = ""
+        suggestions = []
+        guard let key = mapsKey else { return }
+        resolving = true
+        Task {
+            let place = await MapsClient(apiKey: key).placeDetails(s.id, sessionToken: sessionToken)
+            await MainActor.run {
+                resolving = false
+                if let place = place {
+                    suppressNextGeocode = true
+                    placeId = s.id
+                    formatted = place.formattedAddress
+                    hasPoint = true
+                    region.center = CLLocationCoordinate2D(latitude: place.lat, longitude: place.lon)
+                }
+            }
+        }
+    }
+
+    private func scheduleReverseGeocode() {
+        hasPoint = true
+        if suppressNextGeocode { suppressNextGeocode = false; return }
+        guard let key = mapsKey else { return }
+        geocodeTask?.cancel()
+        geocodeTask = Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if Task.isCancelled { return }
+            await MainActor.run { resolving = true }
+            let addr = await MapsClient(apiKey: key).reverseGeocode(region.center.latitude, region.center.longitude)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                resolving = false
+                if let addr = addr { formatted = addr }
+            }
+        }
     }
 
     private func captureLocation() {
@@ -118,9 +283,9 @@ struct AddressView: View {
         let delegate = LocationOneShot { loc in
             DispatchQueue.main.async {
                 if let loc = loc {
-                    self.lat = loc.coordinate.latitude
-                    self.lon = loc.coordinate.longitude
-                    self.accuracy = loc.horizontalAccuracy
+                    self.suppressNextGeocode = false
+                    self.region.center = loc.coordinate
+                    self.hasPoint = true
                 }
                 self.loading = false
                 self.locationDelegate = nil

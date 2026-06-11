@@ -13,7 +13,7 @@ import Foundation
 ///       appUserId: customer.id
 ///   ) { result in
 ///       switch result {
-///       case .completed(let r): print("Started:", r.verificationId)
+///       case .completed(let r): print("Started:", r.verificationCode)
 ///       case .cancelled: break
 ///       case .failed(let e): showError(e)
 ///       }

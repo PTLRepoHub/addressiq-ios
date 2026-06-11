@@ -97,13 +97,27 @@ public struct VerificationLifecycleState {
 public enum AddressIQError: Error, CustomStringConvertible {
     case notInitialized
     case noActiveSession
+    case permissionDenied(message: String)
     case http(status: Int, code: String?, message: String?)
     case providerError(code: String, message: String)
+
+    /// Stable cross-SDK error code string. Matches the closed set used by
+    /// the RN / Flutter / Android SDKs.
+    public var code: String {
+        switch self {
+        case .notInitialized: return "NOT_INITIALIZED"
+        case .noActiveSession: return "NO_ACTIVE_SESSION"
+        case .permissionDenied: return "PERMISSION_DENIED"
+        case let .http(_, code, _): return code ?? "HTTP_ERROR"
+        case let .providerError(code, _): return code
+        }
+    }
 
     public var description: String {
         switch self {
         case .notInitialized: return "AddressIQ.shared.initialize must be called first"
         case .noActiveSession: return "No active verification session"
+        case let .permissionDenied(message): return "AddressIQ permission denied: \(message)"
         case let .http(status, code, message):
             return "AddressIQ HTTP \(status) \(code ?? "")\(message.map { ": \($0)" } ?? "")"
         case let .providerError(code, message):
@@ -171,6 +185,73 @@ public struct StartCombinedArgs {
         self.metadata = metadata
         self.idempotencyKey = idempotencyKey
         self.branchId = branchId
+    }
+}
+
+public struct StartDigitalArgs {
+    public let locationCode: String
+    public let digitalProvider: String?
+    public let metadata: [String: Any]?
+    public let idempotencyKey: String?
+    public let branchId: String?
+
+    public init(
+        locationCode: String,
+        digitalProvider: String? = nil,
+        metadata: [String: Any]? = nil,
+        idempotencyKey: String? = nil,
+        branchId: String? = nil
+    ) {
+        self.locationCode = locationCode
+        self.digitalProvider = digitalProvider
+        self.metadata = metadata
+        self.idempotencyKey = idempotencyKey
+        self.branchId = branchId
+    }
+}
+
+/// Adaptive geofence the backend may return on a start* response. The SDK
+/// honors it when registering OS region monitoring.
+public struct AddressIQGeofence: Equatable {
+    public let lat: Double
+    public let lon: Double
+    public let radiusM: Double
+
+    public init(lat: Double, lon: Double, radiusM: Double) {
+        self.lat = lat
+        self.lon = lon
+        self.radiusM = radiusM
+    }
+
+    /// Parse the `geofence` object from a backend JSON response. Returns
+    /// `nil` when coordinates are absent so callers can no-op gracefully.
+    public init?(json: [String: Any]?) {
+        guard
+            let json,
+            let lat = (json["lat"] as? Double) ?? (json["lat"] as? NSNumber)?.doubleValue,
+            let lon = (json["lon"] as? Double) ?? (json["lon"] as? NSNumber)?.doubleValue
+        else { return nil }
+        let radius = (json["radiusM"] as? Double)
+            ?? (json["radiusM"] as? NSNumber)?.doubleValue
+            ?? (json["radius"] as? Double)
+            ?? 150
+        self.lat = lat
+        self.lon = lon
+        self.radiusM = radius
+    }
+}
+
+/// Result of a digital verification start. Carries the public
+/// `verificationCode` + `status` plus the optional adaptive geofence.
+public struct StartDigitalResult {
+    public let verificationCode: String
+    public let status: String
+    public let geofence: AddressIQGeofence?
+
+    public init(verificationCode: String, status: String, geofence: AddressIQGeofence?) {
+        self.verificationCode = verificationCode
+        self.status = status
+        self.geofence = geofence
     }
 }
 
@@ -341,9 +422,38 @@ public final class AddressIQ {
 
     // MARK: - Verification surface
 
+    /// Start a digital address verification. Uses SDK telemetry +
+    /// geofencing to score residency at the given location. Mirrors
+    /// `startPhysicalVerification` but POSTs to `/verifications/digital`
+    /// with `{"digitalProvider": <provider ?? "internal_ai">}`.
+    @discardableResult
+    public func startVerification(_ args: StartDigitalArgs) async throws -> StartDigitalResult {
+        try assertReadyForVerificationStart()
+        let config = try requireInitialized()
+        let url = config.resolvedApiUrl.appendingPathComponent(
+            "/api/v1/locations/\(args.locationCode)/verifications/digital"
+        )
+        var body: [String: Any] = ["digitalProvider": args.digitalProvider ?? "internal_ai"]
+        if let metadata = args.metadata { body["metadata"] = metadata }
+        let json = try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+        let result = StartDigitalResult(
+            verificationCode: (json["verificationCode"] as? String) ?? "",
+            status: (json["status"] as? String) ?? "PENDING",
+            geofence: AddressIQGeofence(json: json["geofence"] as? [String: Any])
+        )
+        activateCollection(
+            locationCode: (json["locationCode"] as? String) ?? args.locationCode,
+            verificationCode: result.verificationCode,
+            geofence: result.geofence
+        )
+        return result
+    }
+
     /// Start a physical address verification. A partner-provided agent
     /// or KYC provider visits the address to confirm residency.
+    @discardableResult
     public func startPhysicalVerification(_ args: StartPhysicalArgs) async throws -> [String: Any] {
+        try assertReadyForVerificationStart()
         let config = try requireInitialized()
         let url = config.resolvedApiUrl.appendingPathComponent(
             "/api/v1/locations/\(args.locationCode)/verifications/physical"
@@ -352,13 +462,23 @@ public final class AddressIQ {
         if let agentId = args.agentId { body["agentId"] = agentId }
         if let slaHours = args.slaHours { body["slaHours"] = slaHours }
         if let metadata = args.metadata { body["metadata"] = metadata }
-        return try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+        let json = try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+        if let verificationCode = json["verificationCode"] as? String {
+            activateCollection(
+                locationCode: (json["locationCode"] as? String) ?? args.locationCode,
+                verificationCode: verificationCode,
+                geofence: AddressIQGeofence(json: json["geofence"] as? [String: Any])
+            )
+        }
+        return json
     }
 
     /// Start a combined digital + physical verification. Digital runs
     /// first via the AI provider (uses SDK telemetry to score residency);
     /// physical fallback fires if the digital half resolves to UNKNOWN.
+    @discardableResult
     public func startDigitalAndPhysicalVerification(_ args: StartCombinedArgs) async throws -> [String: Any] {
+        try assertReadyForVerificationStart()
         let config = try requireInitialized()
         let url = config.resolvedApiUrl.appendingPathComponent(
             "/api/v1/locations/\(args.locationCode)/verifications/combined"
@@ -371,7 +491,20 @@ public final class AddressIQ {
         if let agentId = args.agentId { body["agentId"] = agentId }
         if let slaHours = args.slaHours { body["slaHours"] = slaHours }
         if let metadata = args.metadata { body["metadata"] = metadata }
-        return try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+        let json = try await post(url, body: body, idempotencyKey: args.idempotencyKey, branchId: args.branchId)
+        // The combined response nests the digital/physical codes; prefer the
+        // digital verification code for the collection session.
+        let digital = json["digital"] as? [String: Any]
+        if let verificationCode = (digital?["verificationCode"] as? String)
+            ?? (json["verificationCode"] as? String)
+        {
+            activateCollection(
+                locationCode: (json["locationCode"] as? String) ?? args.locationCode,
+                verificationCode: verificationCode,
+                geofence: AddressIQGeofence(json: json["geofence"] as? [String: Any])
+            )
+        }
+        return json
     }
 
 
@@ -443,6 +576,43 @@ public final class AddressIQ {
             self.emitState()
         }
         AddressIQBackgroundScheduler.shared.schedule()
+    }
+
+    /// Gate every verification start on granted location permissions
+    /// (cross-SDK §0). Throws `AddressIQError.permissionDenied`
+    /// (code string `PERMISSION_DENIED`) when foreground OR background
+    /// location is not `GRANTED`.
+    func assertReadyForVerificationStart() throws {
+        let permissions = getPermissionState()
+        if permissions["foregroundLocation"] != "GRANTED"
+            || permissions["backgroundLocation"] != "GRANTED"
+        {
+            throw AddressIQError.permissionDenied(
+                message: "Foreground and background location permissions are required before starting verification"
+            )
+        }
+    }
+
+    /// Activate the collection path for a freshly-started verification:
+    /// mark the active session, register the adaptive geofence when the
+    /// backend returned one, and schedule background monitoring. Reuses
+    /// the existing helpers; best-effort so a monitoring failure never
+    /// fails the start* call (P0-5 / P0-11).
+    func activateCollection(
+        locationCode: String,
+        verificationCode: String,
+        geofence: AddressIQGeofence?
+    ) {
+        guard !verificationCode.isEmpty else { return }
+        markActiveSession(locationCode: locationCode, verificationId: verificationCode)
+        if let geofence {
+            locationManager.startMonitoring(
+                latitude: geofence.lat,
+                longitude: geofence.lon,
+                radius: geofence.radiusM,
+                identifier: verificationCode
+            )
+        }
     }
 
     private func requireInitialized() throws -> AddressIQConfig {

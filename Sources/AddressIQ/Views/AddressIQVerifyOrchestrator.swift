@@ -17,6 +17,7 @@ struct AddressIQVerifyOrchestrator: View {
     let firstName: String?
     let lastName: String?
     let email: String?
+    let googleMapsApiKey: String?
     let privacyPolicyUrl: URL?
     let termsUrl: URL?
     let onCompleted: (AddressIQVerifyResult) -> Void
@@ -33,8 +34,24 @@ struct AddressIQVerifyOrchestrator: View {
 
     private var apiBase: URL { environment.defaultApiUrl }
 
+    /// Step index for the indicator (P1-2). `loading` / `submitting` /
+    /// `success` / `error` are not numbered steps → `nil`.
+    private var stepIndex: Int? {
+        switch stage {
+        case .permission: return 0
+        case .address: return 1
+        case .details: return 2
+        case .consent: return 3
+        default: return nil
+        }
+    }
+
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            if let i = stepIndex {
+                StepIndicatorView(current: i, total: 4)
+            }
+            Group {
             switch stage {
             case .loading:
                 LoadingView()
@@ -43,6 +60,7 @@ struct AddressIQVerifyOrchestrator: View {
             case .address:
                 AddressView(
                     initial: address,
+                    googleMapsApiKey: googleMapsApiKey,
                     onNext: { draft in address = draft; stage = .details },
                     onCancel: onCancelled
                 )
@@ -67,7 +85,7 @@ struct AddressIQVerifyOrchestrator: View {
                 LoadingView(message: "Submitting…")
             case .success:
                 if let r = lastResult {
-                    SuccessView(verificationId: r.verificationId, onDone: { onCompleted(r) })
+                    SuccessView(locationCode: r.locationCode, onDone: { onCompleted(r) })
                 } else {
                     LoadingView()
                 }
@@ -77,6 +95,7 @@ struct AddressIQVerifyOrchestrator: View {
                     onRetry: { Task { await createSession() } },
                     onCancel: onCancelled
                 )
+            }
             }
         }
         .task {
@@ -127,7 +146,7 @@ struct AddressIQVerifyOrchestrator: View {
         submitting = true
         defer { submitting = false }
         do {
-            var body: [String: Any] = ["placeId": "sdk_ios_manual"]
+            var body: [String: Any] = ["placeId": address.placeId ?? "sdk_ios_manual"]
             if let v = address.lat { body["lat"] = v }
             if let v = address.lon { body["lon"] = v }
             if let v = address.formattedAddress { body["formattedAddress"] = v }
@@ -135,8 +154,14 @@ struct AddressIQVerifyOrchestrator: View {
             if let v = address.streetName { body["streetName"] = v }
             if let v = address.buildingColor { body["buildingColor"] = v }
             if let v = address.directions { body["directions"] = v }
+            if let v = address.streetviewPanoId { body["streetviewPanoId"] = v }
+            if let v = address.streetviewHeading { body["streetviewHeading"] = v }
             let data = try JSONSerialization.data(withJSONObject: body)
-            var request = URLRequest(url: apiBase.appendingPathComponent("/api/v1/widget/submit"))
+            // Collect-only endpoint: creates the Location and returns its
+            // `locationCode`. It does NOT start a verification or wire
+            // collection — the host owns that via `startVerification(...)`
+            // from the `onCompleted` callback (contract §collect-verify split).
+            var request = URLRequest(url: apiBase.appendingPathComponent("/api/v1/widget/collect"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -144,21 +169,23 @@ struct AddressIQVerifyOrchestrator: View {
             let (respData, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status >= 400 {
-                throw AddressIQVerifyError(code: "HTTP_ERROR", message: "Submit failed (\(status))", httpStatus: status)
+                throw AddressIQVerifyError(code: "HTTP_ERROR", message: "Collect failed (\(status))", httpStatus: status)
             }
             let json = try JSONSerialization.jsonObject(with: respData) as? [String: Any] ?? [:]
-            guard
-                let verificationId = json["verificationId"] as? String,
-                let locationId = json["locationId"] as? String
-            else {
-                throw AddressIQVerifyError(code: "INVALID_RESPONSE", message: "verificationId / locationId missing", httpStatus: status)
+            guard let locationCode = json["locationCode"] as? String else {
+                throw AddressIQVerifyError(code: "INVALID_RESPONSE", message: "locationCode missing", httpStatus: status)
             }
             let r = AddressIQVerifyResult(
-                verificationId: verificationId,
-                locationId: locationId,
-                status: (json["status"] as? String) ?? "PENDING"
+                locationCode: locationCode,
+                formattedAddress: (json["formattedAddress"] as? String) ?? address.formattedAddress,
+                lat: address.lat ?? 0,
+                lon: address.lon ?? 0,
+                placeId: address.placeId
             )
             lastResult = r
+
+            // No collection wiring here — verification (and its geofence +
+            // background collection) is started by the host from `onCompleted`.
             stage = .success
         } catch {
             let typed = error as? AddressIQVerifyError ?? AddressIQVerifyError(code: "NETWORK_ERROR", message: error.localizedDescription, httpStatus: nil)
@@ -209,5 +236,36 @@ private struct ErrorView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.background.ignoresSafeArea())
+    }
+}
+
+/// Slim progress indicator shown atop the Collect UI multi-step flow (P1-2).
+/// A dot per step (the active dot widens) plus a "Step X of N" label, themed
+/// via `EnvironmentValues.addressIQTheme`. Mirrors the React Native
+/// `<IQLocationManager>` and Flutter `AddressIQVerify` indicators.
+@available(iOS 15.0, *)
+private struct StepIndicatorView: View {
+    let current: Int
+    let total: Int
+    @Environment(\.addressIQTheme) private var theme
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                ForEach(0..<total, id: \.self) { i in
+                    Capsule()
+                        .fill(i <= current ? theme.primary : theme.textSecondary.opacity(0.25))
+                        .frame(width: i == current ? 20 : 8, height: 8)
+                        .animation(.easeInOut(duration: 0.2), value: current)
+                }
+            }
+            Spacer()
+            Text("Step \(current + 1) of \(total)")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(theme.textSecondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 }
