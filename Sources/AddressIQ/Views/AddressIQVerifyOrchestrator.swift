@@ -2,7 +2,7 @@ import SwiftUI
 import CoreLocation
 
 private enum Stage: Equatable {
-    case loading, permission, address, details, consent, submitting, success, error
+    case loading, permission, address, streetview, details, consent, submitting, success, error
 }
 
 /// State machine + backend wiring for the verify flow. Holds the
@@ -34,12 +34,13 @@ struct AddressIQVerifyOrchestrator: View {
 
     private var apiBase: URL { environment.defaultApiUrl }
 
-    /// Step index for the indicator (P1-2). `loading` / `submitting` /
-    /// `success` / `error` are not numbered steps → `nil`.
+    /// Step index for the indicator (§6.6: the 4 numbered capture steps 5–8 are
+    /// address(1/4) → streetview(2/4) → details(3/4) → consent(4/4)). Permission
+    /// (step 4) and loading/submitting/success/error are not numbered → `nil`.
     private var stepIndex: Int? {
         switch stage {
-        case .permission: return 0
-        case .address: return 1
+        case .address: return 0
+        case .streetview: return 1
         case .details: return 2
         case .consent: return 3
         default: return nil
@@ -62,6 +63,17 @@ struct AddressIQVerifyOrchestrator: View {
                     initial: address,
                     googleMapsApiKey: googleMapsApiKey,
                     onNext: { draft in address = draft; stage = .details },
+                    onStreetView: { draft in address = draft; stage = .streetview },
+                    onCancel: onCancelled
+                )
+            case .streetview:
+                StreetViewScreen(
+                    apiKey: googleMapsApiKey ?? "",
+                    lat: address.lat ?? 0,
+                    lon: address.lon ?? 0,
+                    panoId: address.streetviewPanoId,
+                    onConfirm: { pano in address.streetviewPanoId = pano; stage = .details },
+                    onBack: { stage = .address },
                     onCancel: onCancelled
                 )
             case .details:

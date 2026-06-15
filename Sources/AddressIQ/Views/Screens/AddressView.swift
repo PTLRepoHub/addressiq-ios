@@ -8,12 +8,18 @@ import MapKit
 /// Autocomplete → MapKit map with a centre pin → auto-derived (read-only)
 /// formatted address → Street View pin-confirm where coverage exists. Falls back
 /// to GPS + a manual formatted-address field when no key is available.
+/// §6.6 step 5 input tabs: current location vs address search.
+private enum AddrMode { case current, search }
+
 @available(iOS 15.0, *)
 struct AddressView: View {
     let initial: AddressDraft
     /// Google Maps API key (enables the map flow). When nil → manual entry.
     let googleMapsApiKey: String?
+    /// Advance to property details (no Street View coverage / no key).
     let onNext: (AddressDraft) -> Void
+    /// Route to the Street View stage (§6.6 step 6) when coverage exists.
+    let onStreetView: (AddressDraft) -> Void
     let onCancel: () -> Void
 
     @Environment(\.addressIQTheme) private var theme
@@ -26,18 +32,18 @@ struct AddressView: View {
     @State private var resolving = false
     @State private var query = ""
     @State private var suggestions: [PlaceSuggestion] = []
-    @State private var showStreetView = false
-    @State private var svPanoId: String?
+    @State private var mode: AddrMode = .current
     @State private var locationDelegate: LocationOneShot?
     @State private var geocodeTask: Task<Void, Never>?
     @State private var suppressNextGeocode = false
 
     private let sessionToken = UUID().uuidString
 
-    init(initial: AddressDraft, googleMapsApiKey: String?, onNext: @escaping (AddressDraft) -> Void, onCancel: @escaping () -> Void) {
+    init(initial: AddressDraft, googleMapsApiKey: String?, onNext: @escaping (AddressDraft) -> Void, onStreetView: @escaping (AddressDraft) -> Void, onCancel: @escaping () -> Void) {
         self.initial = initial
         self.googleMapsApiKey = googleMapsApiKey
         self.onNext = onNext
+        self.onStreetView = onStreetView
         self.onCancel = onCancel
         let center = CLLocationCoordinate2D(latitude: initial.lat ?? 6.5244, longitude: initial.lon ?? 3.3792)
         _region = State(initialValue: MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
@@ -61,8 +67,6 @@ struct AddressView: View {
         ScreenScaffold(
             title: "Confirm your address",
             subtitle: "Search for your address or drop a pin on the map. We'll use this to verify where you live.",
-            step: 0,
-            totalSteps: 3,
             onClose: onCancel,
             content: { content },
             footer: {
@@ -73,42 +77,46 @@ struct AddressView: View {
                 )
             }
         )
-        .fullScreenCover(isPresented: $showStreetView) {
-            if let key = mapsKey {
-                StreetViewScreen(
-                    apiKey: key,
-                    lat: region.center.latitude,
-                    lon: region.center.longitude,
-                    panoId: svPanoId,
-                    onConfirm: { pano in svPanoId = pano; showStreetView = false; finish() },
-                    onBack: { showStreetView = false },
-                    onCancel: onCancel
-                )
-                .environment(\.addressIQTheme, theme)
-            }
-        }
     }
 
     @ViewBuilder private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             if mapsKey != nil {
-                searchBar
-                if !suggestions.isEmpty { suggestionList }
+                // §6.6 step 5: Current Location | Search Address tabs.
+                Picker("", selection: $mode) {
+                    Text("Current Location").tag(AddrMode.current)
+                    Text("Search Address").tag(AddrMode.search)
+                }
+                .pickerStyle(.segmented)
+                if mode == .search {
+                    searchBar
+                    if !suggestions.isEmpty { suggestionList }
+                }
             }
             mapOrLoading
-            Button(action: captureLocation) {
-                HStack(spacing: 6) {
-                    Image(systemName: "location.north.fill").font(.system(size: 12))
-                    Text("Use my current location").font(.system(size: 13, weight: .semibold))
+            if mode == .current || mapsKey == nil {
+                Button(action: captureLocation) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "location.north.fill").font(.system(size: 12))
+                        Text("Use my current location").font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(theme.primary)
                 }
-                .foregroundColor(theme.primary)
             }
             Text("Formatted address").font(.system(size: 14, weight: .semibold)).foregroundColor(theme.text)
             addressField
             Text("The next screen captures property details (house number, building color, directions).")
                 .font(.system(size: 12)).foregroundColor(theme.textSecondary)
         }
-        .onAppear { if !hasPoint { captureLocation() } }
+        .onAppear {
+            if !hasPoint {
+                captureLocation()
+            } else if formatted.isEmpty {
+                // Pre-filled coordinate (e.g. re-editing a saved address):
+                // derive its formatted address up front.
+                scheduleReverseGeocode()
+            }
+        }
         .onChange(of: centerKey) { _ in scheduleReverseGeocode() }
     }
 
@@ -198,35 +206,32 @@ struct AddressView: View {
 
     // ── Actions ──
 
+    /// Address draft (no Street View fields — those are set by the next stage).
+    private func buildDraft() -> AddressDraft {
+        var draft = initial
+        draft.lat = region.center.latitude
+        draft.lon = region.center.longitude
+        draft.formattedAddress = formatted.trimmingCharacters(in: .whitespaces)
+        draft.placeId = placeId
+        return draft
+    }
+
     private func onContinue() {
         guard hasPoint else { return }
+        // §6.6 step 6 is coverage-gated: route to the Street View stage when a
+        // panorama exists near the point, else advance straight to details.
         if let key = mapsKey {
             resolving = true
             Task {
                 let cov = await MapsClient(apiKey: key).streetViewCoverage(region.center.latitude, region.center.longitude)
                 await MainActor.run {
                     resolving = false
-                    if cov.available {
-                        svPanoId = cov.panoId
-                        showStreetView = true
-                    } else {
-                        finish()
-                    }
+                    if cov.available { onStreetView(buildDraft()) } else { onNext(buildDraft()) }
                 }
             }
         } else {
-            finish()
+            onNext(buildDraft())
         }
-    }
-
-    private func finish() {
-        var draft = initial
-        draft.lat = region.center.latitude
-        draft.lon = region.center.longitude
-        draft.formattedAddress = formatted.trimmingCharacters(in: .whitespaces)
-        draft.placeId = placeId
-        draft.streetviewPanoId = svPanoId
-        onNext(draft)
     }
 
     private func onSearchChange() {

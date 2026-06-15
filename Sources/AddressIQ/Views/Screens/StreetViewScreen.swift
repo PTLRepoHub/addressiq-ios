@@ -22,8 +22,6 @@ struct StreetViewScreen: View {
         ScreenScaffold(
             title: "Confirm your building",
             subtitle: "Drag the view to frame your building, then confirm.",
-            step: 1,
-            totalSteps: 3,
             onClose: onCancel,
             content: {
                 StreetViewWeb(apiKey: apiKey, lat: lat, lon: lon)

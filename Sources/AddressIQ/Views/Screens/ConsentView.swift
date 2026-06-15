@@ -19,8 +19,6 @@ struct ConsentView: View {
     var body: some View {
         ScreenScaffold(
             title: "Almost done!",
-            step: 2,
-            totalSteps: 3,
             onBack: onBack,
             onClose: onCancel,
             content: {
