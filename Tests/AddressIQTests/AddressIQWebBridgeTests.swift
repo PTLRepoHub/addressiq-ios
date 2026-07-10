@@ -32,15 +32,37 @@ final class AddressIQWebBridgeTests: XCTestCase {
 
         let gotGetLocation = expectation(description: "native received a getLocation request")
 
+        // Stub the FULL bridge contract, not just `getLocation`. Before the
+        // widget offers "Use my current location" it gates on `requestPermission`
+        // and blocks with the button stuck on "Checking…" until the host answers.
+        // A handler that only served `getLocation` would deadlock there — see
+        // AddressIQWebFlowView.Coordinator.handleRequest, which this mirrors.
         let handler = TestBridgeHandler { webView, message in
             guard let dict = Self.decode(message),
                   dict["kind"] as? String == "request",
-                  dict["action"] as? String == "getLocation",
+                  let action = dict["action"] as? String,
                   let id = dict["id"] as? String else { return }
-            // Native → JS: resolve with a canned fix, mirroring the real Coordinator.
-            let js = "window.AddressIQBridge.resolve(\(Self.jsString(id)), {lat:9.0765,lon:7.3986,accuracy:8});"
-            webView.evaluateJavaScript(js, completionHandler: nil)
-            gotGetLocation.fulfill()
+
+            func resolve(_ literal: String) {
+                webView.evaluateJavaScript(
+                    "window.AddressIQBridge && window.AddressIQBridge.resolve(\(Self.jsString(id)), \(literal));",
+                    completionHandler: nil
+                )
+            }
+
+            switch action {
+            case "getPermissionStatus":
+                resolve("\"granted\"")
+            case "requestPermission", "getPermissionState":
+                resolve("{foreground:true,background:true}")
+            case "openSettings":
+                resolve("true")
+            case "getLocation":
+                resolve("{lat:9.0765,lon:7.3986,accuracy:8}")
+                gotGetLocation.fulfill()
+            default:
+                break
+            }
         }
 
         let controller = WKUserContentController()
