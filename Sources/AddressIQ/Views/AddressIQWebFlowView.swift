@@ -20,7 +20,9 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     let apiKey: String
     let appUserId: String
     let apiURL: URL
-    let widgetURL: URL
+    /// Explicit developer override. `nil` means "use the bundled widget";
+    /// there is no remote default. See AddressIQVerifyView.
+    let widgetURL: URL?
     let businessName: String?
     let primaryColorHex: String?
     let onCompleted: (AddressIQVerifyResult) -> Void
@@ -41,7 +43,20 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         context.coordinator.webView = webView
         context.coordinator.observeForeground()
-        webView.loadHTMLString(htmlDocument(), baseURL: apiURL)
+
+        // Fail closed: with no bundled widget and no explicit override there is
+        // nothing safe to load. Never fall back to a remote script.
+        guard let document = htmlDocument() else {
+            onFailed(AddressIQVerifyError(
+                code: "WIDGET_BUNDLE_MISSING",
+                message: "The bundled widget (iqcollect.js) is missing from the AddressIQ "
+                    + "package and no widgetURL override was supplied. This is a packaging "
+                    + "bug; the SDK will not load the widget from a remote host.",
+                httpStatus: nil
+            ))
+            return webView
+        }
+        webView.loadHTMLString(document, baseURL: apiURL)
         return webView
     }
 
@@ -50,7 +65,9 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     /// Inline page that mounts the widget. `locationProvider` is intentionally
     /// omitted so the widget auto-selects its `BridgeLocationProvider` (native
     /// owns Always/Precise). The bridge is detected via `window.webkit`.
-    private func htmlDocument() -> String {
+    /// Returns `nil` when neither a bundled widget nor an explicit `widgetURL`
+    /// override is available — the caller then fails closed.
+    private func htmlDocument() -> String? {
         // Business identity (name/logo/colour) is fetched by the widget from the
         // backend (tenant behind the API key). Only forward a client-supplied
         // fallback when the integrator explicitly provided one.
@@ -67,13 +84,16 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         if !business.isEmpty { cfg["business"] = business }
         let cfgJSON = (try? JSONSerialization.data(withJSONObject: cfg))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        // Prefer the bundled widget (works offline, version-pinned); fall back to
-        // the hosted bundle only if the resource is missing.
+        // Prefer the bundled widget (works offline, version-pinned). Honour an
+        // explicit developer override. With neither, fail closed — never reach
+        // for a remote script.
         let widgetScript: String
         if let bundled = Self.bundledWidgetJS() {
             widgetScript = "<script>\(bundled)</script>"
-        } else {
+        } else if let widgetURL {
             widgetScript = "<script src=\"\(widgetURL.absoluteString)\"></script>"
+        } else {
+            return nil
         }
         return """
         <!doctype html><html><head>

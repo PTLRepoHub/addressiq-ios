@@ -30,10 +30,17 @@ public struct AddressIQVerifyView: View {
     let onCancelled: () -> Void
     let onFailed: (AddressIQVerifyError) -> Void
 
-    /// Default hosted widget bundle. Override `widgetURL` to point at a locally
-    /// served bundle during development (see docs — run the demo proxy with
-    /// `MOCK_UPSTREAM=1` and serve `dist/iqcollect.js`).
-    static let defaultWidgetURL = URL(string: "https://cdn.addressiq.com/v0.1.0/iqcollect.js")!
+    // There is deliberately NO default remote widget URL.
+    //
+    // The widget ships as an SPM resource / pod resource bundle
+    // (Resources/iqcollect.js). If it is missing the package is broken, and
+    // silently fetching a script from a CDN into this WKWebView — alongside the
+    // session config — would turn a packaging bug into remote code execution.
+    // We fail closed instead, surfacing WIDGET_BUNDLE_MISSING via `onFailed`.
+    //
+    // `widgetURL` remains supported as an explicit developer override for
+    // serving a local bundle during development (see docs — run the demo proxy
+    // with `MOCK_UPSTREAM=1` and serve `dist/iqcollect.js`).
 
     public init(
         apiKey: String,
@@ -81,7 +88,7 @@ public struct AddressIQVerifyView: View {
             apiKey: apiKey,
             appUserId: appUserId,
             apiURL: apiUrlOverride ?? environment.defaultApiUrl,
-            widgetURL: widgetURL ?? Self.defaultWidgetURL,
+            widgetURL: widgetURL,
             businessName: businessName,
             primaryColorHex: nil,
             onCompleted: onCompleted,
