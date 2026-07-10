@@ -111,9 +111,29 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         """
     }
 
-    /// The widget bundle shipped as an SPM resource, if present.
+    /// The widget bundle shipped as a package resource, if present.
+    ///
+    /// The accessor differs by build system: SPM synthesises `Bundle.module`;
+    /// CocoaPods does not, and instead ships the `resource_bundles` entry as a
+    /// nested `AddressIQ.bundle` located relative to the framework the class
+    /// lives in. Referencing `Bundle.module` under CocoaPods is a hard compile
+    /// error ("type 'Bundle' has no member 'module'").
+    private static func resourceBundle() -> Bundle {
+        #if SWIFT_PACKAGE
+        return Bundle.module
+        #else
+        let framework = Bundle(for: Coordinator.self)
+        if let url = framework.url(forResource: "AddressIQ", withExtension: "bundle"),
+           let bundle = Bundle(url: url) {
+            return bundle
+        }
+        // Static-linked pods copy resources straight into the framework bundle.
+        return framework
+        #endif
+    }
+
     private static func bundledWidgetJS() -> String? {
-        guard let url = Bundle.module.url(forResource: "iqcollect", withExtension: "js") else {
+        guard let url = resourceBundle().url(forResource: "iqcollect", withExtension: "js") else {
             return nil
         }
         return try? String(contentsOf: url, encoding: .utf8)
