@@ -72,6 +72,17 @@ final class AddressIQWebBridgeTests: XCTestCase {
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 780), configuration: config)
         handler.webView = webView
 
+        // Put the web view in a key, visible window. WebKit throttles timers and
+        // rendering for a view that is not in a window hierarchy — the widget's
+        // flow is driven by a setInterval, so offscreen it simply never advances.
+        // This passes on a dev machine either way but deadlocks on a headless CI
+        // runner, which is exactly where it was failing.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 780))
+        window.rootViewController = UIViewController()
+        window.rootViewController?.view.addSubview(webView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
         // apiUrl points at a closed port so `listAddresses()` fails fast → the
         // widget falls through to the collect flow (no server needed), whose
         // address step exposes "Use my current location" → getLocation.
