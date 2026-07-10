@@ -14,9 +14,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build + test
         run: |
+          # Don't hardcode a simulator name — the runner image's device set
+          # changes with Xcode, and a missing name fails with "Unable to find a
+          # device matching the provided destination specifier". Pick whatever
+          # booted-capable iPhone the image actually ships.
+          SIM=$(xcrun simctl list devices available -j \
+            | python3 -c "import json,sys; ds=json.load(sys.stdin)['devices']; print(next(d['name'] for rt in sorted(ds) if 'iOS' in rt for d in ds[rt] if d['name'].startswith('iPhone')))")
+          echo "Using simulator: $SIM"
           xcodebuild test \
             -scheme AddressIQ \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,name=$SIM" \
             CODE_SIGNING_ALLOWED=NO
 
   example:
