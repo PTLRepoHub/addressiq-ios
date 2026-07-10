@@ -9,9 +9,9 @@ Pod::Spec.new do |s|
     Native and Flutter SDKs. Address collection plus physical/combined
     verification lifecycle.
   DESC
-  s.homepage         = 'https://addressiq.io'
+  s.homepage         = 'https://addressiqpro.com'
   s.license          = { :type => 'Proprietary', :text => 'Copyright AddressIQ. All rights reserved.' }
-  s.author           = { 'AddressIQ' => 'sdk@addressiq.io' }
+  s.author           = { 'AddressIQ' => 'sdk@addressiqpro.com' }
   s.source           = {
     :git => 'https://github.com/PTLRepoHub/addressiq-ios.git',
     :tag => "v#{s.version}"
@@ -23,4 +23,16 @@ Pod::Spec.new do |s|
 
   s.source_files     = 'Sources/AddressIQ/**/*.swift'
   s.frameworks       = 'Foundation', 'UIKit', 'SwiftUI', 'CoreLocation'
+
+  # source_files globs in Generated/**/*.pb.swift, which `import SwiftProtobuf`.
+  # Mirrors Package.swift's swift-protobuf dependency. Without this the pod
+  # does not compile (unnoticed until now because CI only ran `--quick` lint).
+  s.dependency 'SwiftProtobuf', '~> 1.38'
+
+  # Mirrors Package.swift's .copy("Resources/iqcollect.js"). Without a resource
+  # bundle, `Bundle.module` in AddressIQWebFlowView.swift has no definition and
+  # the widget silently falls back to the hosted CDN URL.
+  # TODO: verify with a full `pod lib lint` that CocoaPods synthesises
+  # `Bundle.module` here — if not, the accessor needs a #if COCOAPODS shim.
+  s.resource_bundles = { 'AddressIQ' => ['Sources/AddressIQ/Resources/iqcollect.js'] }
 end
