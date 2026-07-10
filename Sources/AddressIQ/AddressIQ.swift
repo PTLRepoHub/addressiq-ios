@@ -285,7 +285,21 @@ public final class AddressIQ {
     private init() {}
 
     private func emitState() {
-        stateSubject.send(getVerificationState())
+        // Always invoked from inside a `queue` barrier block, so build the
+        // snapshot directly. Do NOT call getVerificationState() here — it does
+        // `queue.sync`, which re-enters the same queue and deadlocks (crash).
+        stateSubject.send(currentStateSnapshot())
+    }
+
+    /// Snapshot of the lifecycle state. Caller MUST already be on `queue`.
+    private func currentStateSnapshot() -> VerificationLifecycleState {
+        VerificationLifecycleState(
+            state: state,
+            appUserId: user?.appUserId,
+            verificationId: activeVerificationId,
+            locationCode: activeLocationCode,
+            pausedFor: pausedAt.map { Date().timeIntervalSince($0) }
+        )
     }
 
     // MARK: - Lifecycle
@@ -409,13 +423,7 @@ public final class AddressIQ {
     public func getVerificationState() -> VerificationLifecycleState {
         var snapshot: VerificationLifecycleState!
         queue.sync {
-            snapshot = VerificationLifecycleState(
-                state: state,
-                appUserId: user?.appUserId,
-                verificationId: activeVerificationId,
-                locationCode: activeLocationCode,
-                pausedFor: pausedAt.map { Date().timeIntervalSince($0) }
-            )
+            snapshot = currentStateSnapshot()
         }
         return snapshot
     }
@@ -563,6 +571,26 @@ public final class AddressIQ {
     /// they toggle the grant manually.
     public func openSettings() async -> Bool {
         await AddressIQPermissionRequester.shared.openSettings()
+    }
+
+    /// Precise-vs-approximate accuracy state: `{GRANTED, REDUCED, UNAVAILABLE}`.
+    public func getAccuracyState() -> String {
+        AddressIQPermissionRequester.shared.currentAccuracyState()
+    }
+
+    /// Drive the OS toward Always + Precise (the combination verification needs)
+    /// and return the final permission snapshot. `purposeKey` must match an
+    /// `NSLocationTemporaryUsageDescriptionDictionary` entry in the host
+    /// app's Info.plist.
+    public func requestPreciseAndAlways(purposeKey: String = "AddressVerification") async -> [String: String] {
+        await AddressIQPermissionRequester.shared.requestPreciseAndAlways(purposeKey: purposeKey)
+    }
+
+    /// Foreground-only variant — When-In-Use + Precise, **no Always**. The web
+    /// widget's permission gate and one-shot location fix use this; requesting
+    /// Always inline can hang on iOS, so Always is granted via the Settings screen.
+    public func requestForegroundLocation(purposeKey: String = "AddressVerification") async -> [String: String] {
+        await AddressIQPermissionRequester.shared.requestForegroundPrecise(purposeKey: purposeKey)
     }
 
     // MARK: - Internal helpers

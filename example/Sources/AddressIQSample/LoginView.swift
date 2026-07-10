@@ -26,6 +26,17 @@ struct LoginView: View {
                     .pickerStyle(.segmented)
                 }
                 Section {
+                    TextField("Local API URL (optional)", text: $model.localApiUrl)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    TextField("Business name (fallback)", text: $model.businessName)
+                } header: {
+                    Text("Local development")
+                } footer: {
+                    Text("Set Local API URL to e.g. http://localhost:3355 to run against the local backend. Leave empty to use the selected environment.")
+                }
+                Section {
                     Button {
                         busy = true
                         Task { await model.login(); busy = false }

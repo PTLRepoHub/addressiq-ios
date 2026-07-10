@@ -68,11 +68,16 @@ struct HubView: View {
                 environment: model.environment,
                 // Key injected at runtime via env (never hardcoded in source).
                 googleMapsApiKey: ProcessInfo.processInfo.environment["GOOGLE_MAPS_KEY"],
+                // Fallback name if the backend doesn't supply one; the widget
+                // fetches the real business identity from the backend.
+                businessName: model.businessName.isEmpty ? nil : model.businessName,
+                // Point at a local backend for development (see example README).
+                apiUrlOverride: model.localApiUrl.isEmpty ? nil : URL(string: model.localApiUrl),
                 onCompleted: { result in
                     showCollect = false
                     model.remember(locationCode: result.locationCode)
-                    // The Collect UI collects only — the host starts verification
-                    // here from the success callback (contract §collect-verify split).
+                    // The widget runs the full collect flow and returns a
+                    // locationCode; the host starts digital verification here.
                     Task {
                         do {
                             let v = try await AddressIQ.shared.startVerification(

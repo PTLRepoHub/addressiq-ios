@@ -27,7 +27,11 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ],
-            path: "Sources/AddressIQ"
+            path: "Sources/AddressIQ",
+            resources: [
+                // Shared collect/verify web widget, loaded into the WKWebView host.
+                .copy("Resources/iqcollect.js"),
+            ]
         ),
         .testTarget(
             name: "AddressIQTests",

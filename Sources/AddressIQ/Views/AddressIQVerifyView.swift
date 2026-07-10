@@ -23,9 +23,17 @@ public struct AddressIQVerifyView: View {
     let theme: AddressIQThemeOverrides?
     let privacyPolicyUrl: URL?
     let termsUrl: URL?
+    let businessName: String?
+    let widgetURL: URL?
+    let apiUrlOverride: URL?
     let onCompleted: (AddressIQVerifyResult) -> Void
     let onCancelled: () -> Void
     let onFailed: (AddressIQVerifyError) -> Void
+
+    /// Default hosted widget bundle. Override `widgetURL` to point at a locally
+    /// served bundle during development (see docs — run the demo proxy with
+    /// `MOCK_UPSTREAM=1` and serve `dist/iqcollect.js`).
+    static let defaultWidgetURL = URL(string: "https://cdn.addressiq.com/v0.1.0/iqcollect.js")!
 
     public init(
         apiKey: String,
@@ -39,6 +47,9 @@ public struct AddressIQVerifyView: View {
         theme: AddressIQThemeOverrides? = nil,
         privacyPolicyUrl: URL? = nil,
         termsUrl: URL? = nil,
+        businessName: String? = nil,
+        widgetURL: URL? = nil,
+        apiUrlOverride: URL? = nil,
         onCompleted: @escaping (AddressIQVerifyResult) -> Void,
         onCancelled: @escaping () -> Void = {},
         onFailed: @escaping (AddressIQVerifyError) -> Void = { _ in }
@@ -54,28 +65,31 @@ public struct AddressIQVerifyView: View {
         self.theme = theme
         self.privacyPolicyUrl = privacyPolicyUrl
         self.termsUrl = termsUrl
+        self.businessName = businessName
+        self.widgetURL = widgetURL
+        self.apiUrlOverride = apiUrlOverride
         self.onCompleted = onCompleted
         self.onCancelled = onCancelled
         self.onFailed = onFailed
     }
 
     public var body: some View {
-        AddressIQVerifyOrchestrator(
+        // The UI is now the shared web widget (single cross-platform source of
+        // truth) hosted in a WKWebView. This native shell owns only the parts a
+        // webview cannot: Always/Precise permission and the location fix.
+        AddressIQWebFlowView(
             apiKey: apiKey,
             appUserId: appUserId,
-            environment: environment,
-            phone: phone,
-            firstName: firstName,
-            lastName: lastName,
-            email: email,
-            googleMapsApiKey: googleMapsApiKey,
-            privacyPolicyUrl: privacyPolicyUrl,
-            termsUrl: termsUrl,
+            apiURL: apiUrlOverride ?? environment.defaultApiUrl,
+            widgetURL: widgetURL ?? Self.defaultWidgetURL,
+            businessName: businessName,
+            primaryColorHex: nil,
             onCompleted: onCompleted,
             onCancelled: onCancelled,
             onFailed: onFailed
         )
         .environment(\.addressIQTheme, mergeTheme(theme))
+        .ignoresSafeArea(edges: .bottom)
     }
 }
 

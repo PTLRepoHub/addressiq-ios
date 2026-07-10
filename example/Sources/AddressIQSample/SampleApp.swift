@@ -33,6 +33,14 @@ final class AppModel: ObservableObject {
     @Published var environment: AddressIQEnvironment = .sandbox
     @Published var appUserId: String = "cust_sample_001"
 
+    // Demo / local-dev options.
+    /// Fallback business name shown if the backend doesn't provide one. The
+    /// widget normally fetches name/logo/colour from the backend.
+    @Published var businessName: String = "Kuda Business"
+    /// Point the widget's API at a local backend (e.g. `http://localhost:3355`).
+    /// Empty → use `environment`'s hosted URL. See the example README.
+    @Published var localApiUrl: String = ""
+
     // Session state.
     @Published var isLoggedIn: Bool = false
     @Published var lifecycle: String = "uninitialized"

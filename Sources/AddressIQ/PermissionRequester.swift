@@ -75,8 +75,24 @@ public final class AddressIQPermissionRequester: NSObject, CLLocationManagerDele
         return [
             "foregroundLocation": fg,
             "backgroundLocation": bg,
+            "preciseLocation": currentAccuracyState(),
             "notifications": currentNotificationState(),
         ]
+    }
+
+    /// Precise-vs-approximate accuracy authorisation. Cross-SDK value set:
+    /// `{GRANTED, REDUCED, UNAVAILABLE}`. On iOS < 14 accuracy is always full,
+    /// so we report GRANTED. REDUCED means the user granted approximate
+    /// ("Precise Location" off) and the SDK should re-prompt for full accuracy.
+    public func currentAccuracyState() -> String {
+        if #available(iOS 14.0, *) {
+            switch manager.accuracyAuthorization {
+            case .fullAccuracy: return "GRANTED"
+            case .reducedAccuracy: return "REDUCED"
+            @unknown default: return "UNAVAILABLE"
+            }
+        }
+        return "GRANTED"
     }
 
     /// Whether the SDK can still prompt for a given scope. Returns
@@ -115,6 +131,77 @@ public final class AddressIQPermissionRequester: NSObject, CLLocationManagerDele
         return getPermissionState()
     }
 
+    /// Request temporary full ("Precise") accuracy for the given Info.plist
+    /// purpose key. Returns `true` once full accuracy is authorised. iOS < 14
+    /// always has full accuracy, so it returns `true` immediately there.
+    public func requestFullAccuracy(purposeKey: String) async -> Bool {
+        guard #available(iOS 14.0, *) else { return true }
+        if manager.accuracyAuthorization == .fullAccuracy { return true }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: purposeKey) { _ in
+                cont.resume()
+            }
+        }
+        return manager.accuracyAuthorization == .fullAccuracy
+    }
+
+    /// Drive the OS toward the combination address verification needs: Always +
+    /// Precise. Prompts once for permissions, then — mirroring the widget's
+    /// "keep re-prompting until Precise is on" screen — requests full accuracy.
+    /// Returns the final state so the caller (native shell / web bridge) can
+    /// decide whether to re-prompt or deep-link to Settings.
+    public func requestPreciseAndAlways(purposeKey: String) async -> [String: String] {
+        _ = await requestPermissions()
+        _ = await requestFullAccuracy(purposeKey: purposeKey)
+        return getPermissionState()
+    }
+
+    /// Foreground-only prompt: When-In-Use + Precise (full accuracy), WITHOUT the
+    /// Always upgrade. Use for the "verify where you live" gate and one-shot fixes.
+    /// Requesting Always inline can **hang** on iOS — after When-In-Use is granted,
+    /// `requestAlwaysAuthorization` often leaves the status unchanged, so the
+    /// delegate never fires and the awaiting continuation never resumes. Always is
+    /// instead driven by the Settings-route screen (which polls `getPermissionState`).
+    public func requestForegroundPrecise(purposeKey: String) async -> [String: String] {
+        NSLog("[AddressIQ] requestForegroundPrecise start — status=\(currentAuthorizationStatus().rawValue)")
+        // Each step is time-bounded: if the OS never fires the delegate / accuracy
+        // callback (which strands the awaiting continuation and freezes the widget's
+        // permission gate on "Checking…"), we fall through to the current state so the
+        // gate always resolves and can advance (to the Settings-route screen).
+        if currentAuthorizationStatus() == .notDetermined {
+            _ = await Self.withTimeout(seconds: 20, fallback: currentAuthorizationStatus()) {
+                await self.requestWhenInUseAuthorization()
+            }
+            NSLog("[AddressIQ] after whenInUse — status=\(currentAuthorizationStatus().rawValue)")
+        }
+        _ = await Self.withTimeout(seconds: 6, fallback: false) {
+            await self.requestFullAccuracy(purposeKey: purposeKey)
+        }
+        let state = getPermissionState()
+        NSLog("[AddressIQ] requestForegroundPrecise done — \(state)")
+        return state
+    }
+
+    /// Race an async operation against a timeout so a stranded OS callback can't
+    /// hang the caller forever. Returns the operation's result if it finishes in
+    /// time, otherwise `fallback`.
+    static func withTimeout<T: Sendable>(
+        seconds: Double,
+        fallback: T,
+        _ operation: @escaping @Sendable () async -> T
+    ) async -> T {
+        await withTaskGroup(of: T.self) { group in
+            group.addTask { await operation() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return fallback
+            }
+            let result = await group.next() ?? fallback
+            group.cancelAll()
+            return result
+        }
+    }
+
     /// Deep-link to the host app's Settings page so the user can
     /// re-enable a `.denied` permission. Returns `true` if the
     /// URL opened successfully.
@@ -143,7 +230,15 @@ public final class AddressIQPermissionRequester: NSObject, CLLocationManagerDele
     // MARK: - Internals
 
     private func requestWhenInUseAuthorization() async -> CLAuthorizationStatus {
-        await withCheckedContinuation { (cont: CheckedContinuation<CLAuthorizationStatus, Never>) in
+        // iOS silently no-ops the request (no dialog, no delegate callback) when
+        // the usage string is missing — which would hang this continuation forever.
+        // Guard so a mis-configured host degrades gracefully instead of freezing
+        // the widget's permission gate on "Checking…".
+        guard hasInfoPlistKey("NSLocationWhenInUseUsageDescription") else {
+            print("[AddressIQ] Cannot request location: add NSLocationWhenInUseUsageDescription to your app's Info.plist.")
+            return currentAuthorizationStatus()
+        }
+        return await withCheckedContinuation { (cont: CheckedContinuation<CLAuthorizationStatus, Never>) in
             lock.lock()
             pendingContinuation = cont
             lock.unlock()
@@ -154,7 +249,11 @@ public final class AddressIQPermissionRequester: NSObject, CLLocationManagerDele
     }
 
     private func requestAlwaysAuthorization() async -> CLAuthorizationStatus {
-        await withCheckedContinuation { (cont: CheckedContinuation<CLAuthorizationStatus, Never>) in
+        guard hasInfoPlistKey("NSLocationAlwaysAndWhenInUseUsageDescription") else {
+            print("[AddressIQ] Cannot request Always location: add NSLocationAlwaysAndWhenInUseUsageDescription to your app's Info.plist.")
+            return currentAuthorizationStatus()
+        }
+        return await withCheckedContinuation { (cont: CheckedContinuation<CLAuthorizationStatus, Never>) in
             lock.lock()
             pendingContinuation = cont
             lock.unlock()
@@ -162,6 +261,10 @@ public final class AddressIQPermissionRequester: NSObject, CLLocationManagerDele
                 self?.manager.requestAlwaysAuthorization()
             }
         }
+    }
+
+    private func hasInfoPlistKey(_ key: String) -> Bool {
+        (Bundle.main.object(forInfoDictionaryKey: key) as? String)?.isEmpty == false
     }
 
     private func requestNotificationAuthorization() async {

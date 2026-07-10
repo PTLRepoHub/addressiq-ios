@@ -22,6 +22,19 @@ public final class AddressIQBackgroundScheduler {
     public func register(syncHandler: @escaping () async -> Void) {
         #if canImport(BackgroundTasks)
         if #available(iOS 13.0, *) {
+            // `BGTaskScheduler.register` traps (hard crash) if the identifier is
+            // not declared in Info.plist's `BGTaskSchedulerPermittedIdentifiers`.
+            // Guard on it so a host that hasn't opted into background modes gets a
+            // no-op + one-time warning instead of crashing inside `initialize()`.
+            let permitted = (Bundle.main.object(
+                forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers"
+            ) as? [String]) ?? []
+            guard permitted.contains(Self.telemetrySyncIdentifier) else {
+                print("[AddressIQ] Background telemetry sync is disabled. To enable it, add "
+                    + "\"\(Self.telemetrySyncIdentifier)\" to BGTaskSchedulerPermittedIdentifiers "
+                    + "and \"processing\" to UIBackgroundModes in your Info.plist.")
+                return
+            }
             BGTaskScheduler.shared.register(
                 forTaskWithIdentifier: Self.telemetrySyncIdentifier,
                 using: nil
