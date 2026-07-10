@@ -4,7 +4,7 @@ version: v2
 # once the BSR module is published.
 inputs:
   - git_repo: https://github.com/PTLRepoHub/AddressIq-proto.git
-    branch: main
+    tag: v0.1.0
 plugins:
   # Swift bindings. google.protobuf well-known types come from the
   # SwiftProtobuf runtime (declared in Package.swift), so they are NOT
