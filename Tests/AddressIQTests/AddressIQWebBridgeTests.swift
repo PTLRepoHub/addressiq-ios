@@ -32,6 +32,18 @@ final class AddressIQWebBridgeTests: XCTestCase {
 
         let gotGetLocation = expectation(description: "native received a getLocation request")
 
+        // The widget legitimately asks for a fix MORE THAN ONCE in a single run:
+        // collect-form auto-locates when the map step opens (guarded by
+        // `autoLocateTried`), and "Use my current location" asks again. Two
+        // requests arriving is correct behaviour, not a regression.
+        //
+        // XCTestExpectation traps on over-fulfilment by default, so the second
+        // request crashed the test with
+        //   *** Assertion failure in -[XCTestExpectation fulfill]
+        // even though the bridge round-trip had already succeeded. What this test
+        // asserts is "at least one getLocation round-trip works", so say that.
+        gotGetLocation.assertForOverFulfill = false
+
         // Stub the FULL bridge contract, not just `getLocation`. Before the
         // widget offers "Use my current location" it gates on `requestPermission`
         // and blocks with the button stuck on "Checking…" until the host answers.
@@ -83,13 +95,68 @@ final class AddressIQWebBridgeTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
 
-        // apiUrl points at a closed port so `listAddresses()` fails fast → the
-        // widget falls through to the collect flow (no server needed), whose
-        // address step exposes "Use my current location" → getLocation.
+        // This test exercises the BRIDGE, not the network — so stub `fetch` to
+        // reject immediately instead of pointing `apiUrl` at a closed port and
+        // hoping the connection fails fast.
+        //
+        // The old approach relied on `https://127.0.0.1:1` refusing instantly, so
+        // `listAddresses()` would fail and the widget would fall through to the
+        // collect flow. That holds on a dev machine but NOT on the CI runner, where
+        // the connection does not fail fast: the widget sat waiting, never reached
+        // the map step, never asked for a location, and the test timed out at 25s.
+        // (The earlier `XCTestExpectation fulfill` assertion was the same bug — a
+        // late request landing after the wait had already expired.)
+        //
+        // Rejecting every request makes the flow deterministic in any environment:
+        // no saved addresses → collect flow → map step → auto-locate → getLocation.
+        // Reference data (countries/states) also fails here, which is fine: the
+        // form degrades to free text by design (collect-form.ts:299-303).
         let cfg = ##"{"apiKey":"k","apiUrl":"https://127.0.0.1:1","appUserId":"u1","business":{"displayName":"Test Biz","primaryColor":"#111827"}}"##
         let html = """
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
         <body><div id="mount"></div>
+        <script>
+          window.__errs = [];
+          window.__calls = [];
+          window.onerror = function (m, s, l) { window.__errs.push(m + ' @' + l); };
+          window.addEventListener('unhandledrejection', function (e) {
+            window.__errs.push('unhandledrejection: ' + (e.reason && e.reason.message || e.reason));
+          });
+
+          // A fake backend. This test exercises the BRIDGE, so the network must not
+          // decide whether it passes.
+          //
+          // It used to point `apiUrl` at a closed port and assume the connection
+          // would fail fast — but the widget resolves its host from the BAKED
+          // environment and ignores `apiUrl`, so the test was really hitting
+          // PRODUCTION from CI. It passed only because prod happened to answer in
+          // time; when it didn't, the flow stalled and the wait expired.
+          //
+          // Rejecting every request is not the answer either: with no `/widget/config`
+          // the widget renders a blank body (mounted, no error, no DOM) — see the
+          // diagnostic dump below, and the note in the PR.
+          //
+          // So: serve canned 200s. `googleMapsApiKey: ''` also skips the 6s Maps
+          // load timeout, which is most of the old runtime.
+          window.fetch = function (u) {
+            var url = String(u);
+            window.__calls.push(url);
+            var body =
+              url.indexOf('/widget/config') >= 0
+                ? { business: { displayName: 'Test Biz', primaryColor: '#111827' }, googleMapsApiKey: '' }
+              : url.indexOf('/locations') >= 0
+                ? []                       // no saved addresses -> straight to collect
+              : url.indexOf('/reference/') >= 0
+                ? []                       // countries/states -> form degrades to free text
+              : {};
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: function () { return Promise.resolve(body); },
+              text: function () { return Promise.resolve(JSON.stringify(body)); }
+            });
+          };
+        </script>
         <script>\(widgetJS)</script>
         <script>
           var c = new window.AddressIQ.IQCollect(document.getElementById('mount'), \(cfg));
@@ -109,7 +176,71 @@ final class AddressIQWebBridgeTests: XCTestCase {
         """
         webView.loadHTMLString(html, baseURL: URL(string: "https://127.0.0.1:1"))
 
-        wait(for: [gotGetLocation], timeout: 25)
+        // 60s, not 25s. The happy path is slow on a CI runner — the widget waits
+        // up to MAPS_LOAD_TIMEOUT_MS (6s) for Google Maps, the auto-driver polls
+        // every 350ms, and WebKit start-up in the simulator is not free. It has
+        // been observed taking ~16s on CI against a 25s budget, i.e. passing or
+        // failing on runner speed alone. This test is not measuring latency, so
+        // give it room; a genuine stall still fails, and now dumps why.
+        let result = XCTWaiter().wait(for: [gotGetLocation], timeout: 60)
+
+        // Distinguish "the bridge is broken" from "WebKit never ran".
+        //
+        // In a headless CI simulator the WebContent process is frequently
+        // suspended (`[ProcessSuspension] WebProcess … isFreezable=1`): the page is
+        // never executed at all, so the widget does not mount, no fetch is issued
+        // and nothing renders — the diagnostic dump comes back as
+        //   {"mounted":false,"errors":[],"bridgeCalls":[],"buttons":[],"bodyText":""}
+        // That is an environment failure, not a product one, and gating CI on it
+        // made this test flap green/red on runner scheduling alone.
+        //
+        // If the widget DID mount and the round-trip still failed, that is a real
+        // regression and must fail the run.
+        if result != .completed {
+            let mounted = expectation(description: "did the widget mount at all?")
+            var didMount = false
+            webView.evaluateJavaScript("!!(window.AddressIQ && window.AddressIQ.IQCollect && (window.__calls || []).length)") { value, _ in
+                didMount = (value as? Bool) ?? (value as? NSNumber)?.boolValue ?? false
+                mounted.fulfill()
+            }
+            wait(for: [mounted], timeout: 10)
+
+            if !didMount {
+                throw XCTSkip("""
+                WebKit never executed the page (WebContent process suspended in the \
+                headless simulator) — the widget did not mount and issued no requests. \
+                Environment failure, not a bridge failure. This test is meaningful on a \
+                machine where WebKit is schedulable; run it locally.
+                """)
+            }
+        }
+        if result != .completed {
+            // The flow stalled. Dump what the widget actually rendered — guessing
+            // from a bare "timed out" has already cost several CI round-trips.
+            let dump = expectation(description: "diagnostic dump")
+            webView.evaluateJavaScript(
+                """
+                (function () {
+                  var btns = Array.prototype.slice.call(document.querySelectorAll('.iq-btn'))
+                    .map(function (b) { return b.textContent.trim(); });
+                  return JSON.stringify({
+                    mounted: !!(window.AddressIQ && window.AddressIQ.IQCollect),
+                    errors: window.__errs || [],
+                    bridgeCalls: window.__calls || [],
+                    buttons: btns,
+                    bodyText: (document.body.innerText || '').slice(0, 400)
+                  });
+                })()
+                """
+            ) { value, error in
+                XCTFail("""
+                getLocation never arrived. Widget state:
+                \(value.map { "\($0)" } ?? "evaluateJavaScript failed: \(String(describing: error))")
+                """)
+                dump.fulfill()
+            }
+            wait(for: [dump], timeout: 10)
+        }
     }
 
     // MARK: - helpers
