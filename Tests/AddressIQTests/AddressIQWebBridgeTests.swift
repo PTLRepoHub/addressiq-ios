@@ -122,9 +122,39 @@ final class AddressIQWebBridgeTests: XCTestCase {
           window.addEventListener('unhandledrejection', function (e) {
             window.__errs.push('unhandledrejection: ' + (e.reason && e.reason.message || e.reason));
           });
+
+          // A fake backend. This test exercises the BRIDGE, so the network must not
+          // decide whether it passes.
+          //
+          // It used to point `apiUrl` at a closed port and assume the connection
+          // would fail fast — but the widget resolves its host from the BAKED
+          // environment and ignores `apiUrl`, so the test was really hitting
+          // PRODUCTION from CI. It passed only because prod happened to answer in
+          // time; when it didn't, the flow stalled and the wait expired.
+          //
+          // Rejecting every request is not the answer either: with no `/widget/config`
+          // the widget renders a blank body (mounted, no error, no DOM) — see the
+          // diagnostic dump below, and the note in the PR.
+          //
+          // So: serve canned 200s. `googleMapsApiKey: ''` also skips the 6s Maps
+          // load timeout, which is most of the old runtime.
           window.fetch = function (u) {
-            window.__calls.push('fetch ' + u);
-            return Promise.reject(new Error('network disabled in AddressIQWebBridgeTests'));
+            var url = String(u);
+            window.__calls.push(url);
+            var body =
+              url.indexOf('/widget/config') >= 0
+                ? { business: { displayName: 'Test Biz', primaryColor: '#111827' }, googleMapsApiKey: '' }
+              : url.indexOf('/locations') >= 0
+                ? []                       // no saved addresses -> straight to collect
+              : url.indexOf('/reference/') >= 0
+                ? []                       // countries/states -> form degrades to free text
+              : {};
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: function () { return Promise.resolve(body); },
+              text: function () { return Promise.resolve(JSON.stringify(body)); }
+            });
           };
         </script>
         <script>\(widgetJS)</script>
