@@ -6,4 +6,5 @@
 // local builds and tests working when no substitution has run.
 enum BuildConfig {
     static let apiURL = "https://api.addressiqpro.com"
+    static let ingestURL = "https://ingest-api.addressiqpro.com"
 }

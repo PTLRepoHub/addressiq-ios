@@ -128,7 +128,13 @@ the checked-in default is used for local builds and tests);
 `.development` → `http://localhost:3355` (a backend running on your host
 machine; the iOS simulator reaches it via `localhost`).
 
-The base URL is resolved entirely from `environment` — integrators never pass
+Transit-event batches are ingested through a dedicated host, resolved the same
+way from `environment`: `.production` → `https://ingest-api.addressiqpro.com`
+(baked at release time from the `ADDRESSIQ_INGEST_URL` GitHub variable);
+`.sandbox` → `https://ingest-api-staging.addressiqpro.com`; `.development` →
+`http://localhost:3355`.
+
+The base URLs are resolved entirely from `environment` — integrators never pass
 a URL. Use `.development` to run against a local backend; never ship a
 `.development` build.
 

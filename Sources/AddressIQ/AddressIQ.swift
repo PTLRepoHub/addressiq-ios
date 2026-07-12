@@ -47,6 +47,13 @@ public struct AddressIQConfig {
     public var resolvedApiUrl: URL {
         return environment.defaultApiUrl
     }
+
+    /// Effective ingest URL for transit-event batches, resolved entirely from
+    /// `environment`. Ingestion is served by a dedicated host, distinct from
+    /// the main API host.
+    public var resolvedIngestUrl: URL {
+        return environment.defaultIngestUrl
+    }
 }
 
 public enum AddressIQEnvironment: String {
@@ -66,6 +73,21 @@ public enum AddressIQEnvironment: String {
             return URL(string: BuildConfig.apiURL) ?? URL(string: "https://api.addressiqpro.com")!
         case .sandbox:
             return URL(string: "https://api-staging.addressiqpro.com")!
+        case .development:
+            return URL(string: "http://localhost:3355")!
+        }
+    }
+
+    /// Ingest base URL the SDK resolves to for this environment. Transit-event
+    /// batches post here rather than to `defaultApiUrl`.
+    public var defaultIngestUrl: URL {
+        switch self {
+        case .production:
+            // Baked in at publish time from the `ADDRESSIQ_INGEST_URL` GitHub
+            // variable; falls back to the literal if the value fails to parse.
+            return URL(string: BuildConfig.ingestURL) ?? URL(string: "https://ingest-api.addressiqpro.com")!
+        case .sandbox:
+            return URL(string: "https://ingest-api-staging.addressiqpro.com")!
         case .development:
             return URL(string: "http://localhost:3355")!
         }
@@ -325,7 +347,7 @@ public final class AddressIQ {
         guard !batch.isEmpty, let config else { return }
         let payload = batch.map { $0.payload }.joined(separator: ",")
         let body = "{\"events\":[\(payload)]}"
-        var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent("/v1/transit-events/batch"))
+        var request = URLRequest(url: config.resolvedIngestUrl.appendingPathComponent("/v1/transit-events/batch"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
