@@ -188,7 +188,7 @@ xcrun simctl location booted set 6.5244,3.3792
 ```
 
 The map key is provisioned by the platform and delivered to the widget via
-`GET /api/v1/widget/config` — integrators do not supply a Maps/Mapbox key. The
+`GET /api/v1/widget/config` — integrators do not supply a Google Maps key. The
 API key comes from the **Login** screen (pre-filled with
 `aiq_test_demo_bank_seed01`, `.sandbox`). The
 generated app's `Info.plist` **must** include
