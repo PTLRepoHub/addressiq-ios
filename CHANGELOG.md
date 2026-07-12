@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.2.0...v0.3.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* removed AddressIQConfig.apiUrl and the AddressIQVerifyView apiUrlOverride parameter. Select a host via `environment` (production | sandbox | development); production is provisioned at build time.
+
+### Features
+
+* provision API URL (+ web: Maps key) at build time from GH env ([#6](https://github.com/PTLRepoHub/addressiq-ios/issues/6)) ([c180970](https://github.com/PTLRepoHub/addressiq-ios/commit/c180970b6de01c62852381db635529e857cfcfd9))
+
 ## [0.2.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.1.0...v0.2.0) (2026-07-12)
 
 
