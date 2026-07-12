@@ -32,40 +32,64 @@ public enum AddressIQLifecycleState: String {
 public struct AddressIQConfig {
     public let apiKey: String
     public let environment: AddressIQEnvironment
-    /// Optional override for the API base URL. Production integrations
-    /// should leave this nil — the SDK resolves the right URL from
-    /// `environment`. Override only when routing through a partner
-    /// proxy or running against a hermetic test backend.
-    public let apiUrl: URL?
 
     public init(
         apiKey: String,
-        environment: AddressIQEnvironment = .production,
-        apiUrl: URL? = nil
+        environment: AddressIQEnvironment = .production
     ) {
         self.apiKey = apiKey
         self.environment = environment
-        self.apiUrl = apiUrl
     }
 
-    /// Effective API URL: explicit override if provided, otherwise the
-    /// env default.
+    /// Effective API URL, resolved entirely from `environment`. The SDK
+    /// never accepts a caller-supplied URL — production and sandbox point
+    /// at the hosted backends, `.development` at the local dev backend.
     public var resolvedApiUrl: URL {
-        return apiUrl ?? environment.defaultApiUrl
+        return environment.defaultApiUrl
+    }
+
+    /// Effective ingest URL for transit-event batches, resolved entirely from
+    /// `environment`. Ingestion is served by a dedicated host, distinct from
+    /// the main API host.
+    public var resolvedIngestUrl: URL {
+        return environment.defaultIngestUrl
     }
 }
 
 public enum AddressIQEnvironment: String {
     case sandbox
     case production
+    /// Local development backend. The compiled-in URL targets a backend
+    /// running on the host machine; the iOS simulator reaches it via
+    /// `localhost`. Never ship a build configured for `.development`.
+    case development
 
-    /// Public API base URL the SDK resolves to when no override is set.
+    /// Public API base URL the SDK resolves to for this environment.
     public var defaultApiUrl: URL {
         switch self {
         case .production:
-            return URL(string: "https://api.addressiqpro.com")!
+            // Baked in at publish time from the `ADDRESSIQ_API_URL` GitHub
+            // variable; falls back to the literal if the value fails to parse.
+            return URL(string: BuildConfig.apiURL) ?? URL(string: "https://api.addressiqpro.com")!
         case .sandbox:
             return URL(string: "https://api-staging.addressiqpro.com")!
+        case .development:
+            return URL(string: "http://localhost:3355")!
+        }
+    }
+
+    /// Ingest base URL the SDK resolves to for this environment. Transit-event
+    /// batches post here rather than to `defaultApiUrl`.
+    public var defaultIngestUrl: URL {
+        switch self {
+        case .production:
+            // Baked in at publish time from the `ADDRESSIQ_INGEST_URL` GitHub
+            // variable; falls back to the literal if the value fails to parse.
+            return URL(string: BuildConfig.ingestURL) ?? URL(string: "https://ingest-api.addressiqpro.com")!
+        case .sandbox:
+            return URL(string: "https://ingest-api-staging.addressiqpro.com")!
+        case .development:
+            return URL(string: "http://localhost:3355")!
         }
     }
 }
@@ -323,7 +347,7 @@ public final class AddressIQ {
         guard !batch.isEmpty, let config else { return }
         let payload = batch.map { $0.payload }.joined(separator: ",")
         let body = "{\"events\":[\(payload)]}"
-        var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent("/v1/transit-events/batch"))
+        var request = URLRequest(url: config.resolvedIngestUrl.appendingPathComponent("/v1/transit-events/batch"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")

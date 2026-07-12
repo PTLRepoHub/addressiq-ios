@@ -121,17 +121,22 @@ The collect UI surfaces `AddressIQVerifyError` (`code`, `message`,
 
 ## Environment
 
-`AddressIQEnvironment.production` → `https://api.addressiqpro.com`;
-`.sandbox` → `https://api-staging.addressiqpro.com`. Override the base URL only
-for a partner proxy or hermetic test backend via `AddressIQConfig(apiUrl:)`.
+`AddressIQEnvironment` offers `.production`, `.sandbox`, and `.development`.
+Integrators simply choose one; `.development` targets a backend running on your
+host machine (the iOS simulator reaches it via `localhost`).
+
+The base URLs — including the dedicated host used for transit-event batch
+ingestion — are resolved entirely from `environment`; integrators never pass a
+URL. Use `.development` to run against a local backend; never ship a
+`.development` build.
 
 ## Example app
 
 A SwiftUI sample (iOS 15+) demonstrating the full screen canon. After
 **Login**, the app shows a five-tab interface:
 
-- **Login** — environment picker (sandbox/production) + appUserId field →
-  `initialize(config:)` + `setUser(_:)`.
+- **Login** — environment picker (development/sandbox/production) + appUserId
+  field → `initialize(config:)` + `setUser(_:)`.
 - **Verify** — human-labelled hub: a **Collect Address** button that opens the
   `AddressIQVerifyView` collect UI as a sheet, plus **Digital / Physical /
   Digital + Physical** buttons that call the SDK API. A lifecycle status chip
@@ -188,7 +193,7 @@ xcrun simctl location booted set 6.5244,3.3792
 ```
 
 The map key is provisioned by the platform and delivered to the widget via
-`GET /api/v1/widget/config` — integrators do not supply a Maps/Mapbox key. The
+`GET /api/v1/widget/config` — integrators do not supply a Google Maps key. The
 API key comes from the **Login** screen (pre-filled with
 `aiq_test_demo_bank_seed01`, `.sandbox`). The
 generated app's `Info.plist` **must** include

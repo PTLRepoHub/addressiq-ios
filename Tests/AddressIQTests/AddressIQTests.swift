@@ -14,14 +14,27 @@ final class AddressIQTests: XCTestCase {
         XCTAssertNotEqual(sandbox, production)
     }
 
-    func testConfigResolvesEnvironmentUrlWhenNoOverride() {
+    func testConfigResolvesEnvironmentUrl() {
         let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .sandbox)
         XCTAssertEqual(config.resolvedApiUrl, AddressIQEnvironment.sandbox.defaultApiUrl)
     }
 
-    func testConfigHonorsExplicitOverride() {
-        let override = URL(string: "https://proxy.partner.example")!
-        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .production, apiUrl: override)
-        XCTAssertEqual(config.resolvedApiUrl, override)
+    func testDevelopmentEnvironmentResolvesLocalhost() {
+        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .development)
+        XCTAssertEqual(config.resolvedApiUrl, URL(string: "http://localhost:3355")!)
+    }
+
+    func testIngestUrlIsDistinctFromApiUrl() {
+        let production = AddressIQConfig(apiKey: "aiq_test_key", environment: .production)
+        XCTAssertEqual(production.resolvedIngestUrl.scheme, "https")
+        XCTAssertNotEqual(production.resolvedIngestUrl, production.resolvedApiUrl)
+
+        let sandbox = AddressIQConfig(apiKey: "aiq_test_key", environment: .sandbox)
+        XCTAssertNotEqual(sandbox.resolvedIngestUrl, sandbox.resolvedApiUrl)
+    }
+
+    func testDevelopmentIngestResolvesLocalhost() {
+        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .development)
+        XCTAssertEqual(config.resolvedIngestUrl, URL(string: "http://localhost:3355")!)
     }
 }
