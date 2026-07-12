@@ -66,8 +66,6 @@ struct HubView: View {
                 apiKey: model.apiKey,
                 appUserId: model.appUserId,
                 environment: model.environment,
-                // Key injected at runtime via env (never hardcoded in source).
-                googleMapsApiKey: ProcessInfo.processInfo.environment["GOOGLE_MAPS_KEY"],
                 // Fallback name if the backend doesn't supply one; the widget
                 // fetches the real business identity from the backend.
                 businessName: model.businessName.isEmpty ? nil : model.businessName,
