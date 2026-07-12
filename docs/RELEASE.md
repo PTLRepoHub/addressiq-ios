@@ -78,6 +78,27 @@ They produce the six constants in `BuildConfig.swift`
 (`http://localhost:4000`) and stays a compile-time literal
 (`AddressIQ.swift:113-114`). Never ship a `.development` build.
 
+### The two widget pins (files, not repo variables)
+
+`BuildConfig.swift` also carries `widgetVersion` and `widgetIntegrity`. These
+are **not** repository variables: the baker reads them from two files at the
+repo root — `.widget-version` and `.widget-integrity`
+(`bake-build-config.sh:90-92`) — which addressiq-web's `widget-fanout.yml`
+commits on every web release, from **the same build** `cdn.yml` uploads. The
+hash therefore cannot drift from the bytes on the CDN.
+
+They pin the widget the verify webview loads:
+`{cdn}/v{widgetVersion}/iqcollect.js` with `integrity="{widgetIntegrity}"`
+(`Sources/AddressIQ/Views/AddressIQWebFlowView.swift:184-195`). WebKit enforces
+the pin, and the bundled `Resources/iqcollect.js` is inlined as an `onerror`
+fallback, so a CDN outage or an integrity failure degrades to the shipped
+bundle rather than a blank sheet.
+
+If either file is empty/absent, both constants bake to `""`, the CDN path is
+disabled and the SDK is bundled-only (`bake-build-config.sh:99-102`). They are
+deliberately **not** covered by `--strict` — a release must not fail just
+because no web widget has been fanned out yet. Never hand-write a hash.
+
 ### ⚠️ Behaviour change: a release now FAILS on missing config
 
 The old step `sed`'d each key and, when a variable was unset, printed
