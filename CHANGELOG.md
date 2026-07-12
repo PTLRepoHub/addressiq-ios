@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.1.0...v0.2.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* removed the googleMapsApiKey parameter from AddressIQVerifyView.init. The key is provisioned automatically by the platform; there is nothing to pass.
+
+### Features
+
+* **proto:** regen against proto v0.1.0 ([#2](https://github.com/PTLRepoHub/addressiq-ios/issues/2)) ([3f2958a](https://github.com/PTLRepoHub/addressiq-ios/commit/3f2958ad3bae49b12d779388bc285317cc2a6a00))
+* provision Google Maps key automatically; remove googleMapsApiKey ([#4](https://github.com/PTLRepoHub/addressiq-ios/issues/4)) ([1a34bde](https://github.com/PTLRepoHub/addressiq-ios/commit/1a34bde1e2a005d00028ec9382a14a46b18f9cd0))
+
+
+### Bug Fixes
+
+* **core:** host the test WKWebView in a key window ([d85d0fd](https://github.com/PTLRepoHub/addressiq-ios/commit/d85d0fddbf12e3cff5031c1159479ea9133a728b))
+* **core:** resolve the widget bundle under CocoaPods, not just SPM ([266e67b](https://github.com/PTLRepoHub/addressiq-ios/commit/266e67be6fcfe16ab0fdb6796b6d5ddd1fc86f7f))
+* **core:** stub the full bridge contract in the WebView round-trip test ([c04c3ff](https://github.com/PTLRepoHub/addressiq-ios/commit/c04c3ff76987758f270443c201aea23d77bcc253))
+
 ## 0.1.0 (2026-07-10)
 
 
