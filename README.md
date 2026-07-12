@@ -121,21 +121,13 @@ The collect UI surfaces `AddressIQVerifyError` (`code`, `message`,
 
 ## Environment
 
-`AddressIQEnvironment.production` → `https://api.addressiqpro.com` (baked into
-published pods at release time from the `ADDRESSIQ_API_URL` GitHub variable;
-the checked-in default is used for local builds and tests);
-`.sandbox` → `https://api-staging.addressiqpro.com`;
-`.development` → `http://localhost:3355` (a backend running on your host
-machine; the iOS simulator reaches it via `localhost`).
+`AddressIQEnvironment` offers `.production`, `.sandbox`, and `.development`.
+Integrators simply choose one; `.development` targets a backend running on your
+host machine (the iOS simulator reaches it via `localhost`).
 
-Transit-event batches are ingested through a dedicated host, resolved the same
-way from `environment`: `.production` → `https://ingest-api.addressiqpro.com`
-(baked at release time from the `ADDRESSIQ_INGEST_URL` GitHub variable);
-`.sandbox` → `https://ingest-api-staging.addressiqpro.com`; `.development` →
-`http://localhost:3355`.
-
-The base URLs are resolved entirely from `environment` — integrators never pass
-a URL. Use `.development` to run against a local backend; never ship a
+The base URLs — including the dedicated host used for transit-event batch
+ingestion — are resolved entirely from `environment`; integrators never pass a
+URL. Use `.development` to run against a local backend; never ship a
 `.development` build.
 
 ## Example app
