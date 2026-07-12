@@ -116,7 +116,14 @@ final class AddressIQWebBridgeTests: XCTestCase {
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
         <body><div id="mount"></div>
         <script>
-          window.fetch = function () {
+          window.__errs = [];
+          window.__calls = [];
+          window.onerror = function (m, s, l) { window.__errs.push(m + ' @' + l); };
+          window.addEventListener('unhandledrejection', function (e) {
+            window.__errs.push('unhandledrejection: ' + (e.reason && e.reason.message || e.reason));
+          });
+          window.fetch = function (u) {
+            window.__calls.push('fetch ' + u);
             return Promise.reject(new Error('network disabled in AddressIQWebBridgeTests'));
           };
         </script>
@@ -139,7 +146,34 @@ final class AddressIQWebBridgeTests: XCTestCase {
         """
         webView.loadHTMLString(html, baseURL: URL(string: "https://127.0.0.1:1"))
 
-        wait(for: [gotGetLocation], timeout: 25)
+        let result = XCTWaiter().wait(for: [gotGetLocation], timeout: 25)
+        if result != .completed {
+            // The flow stalled. Dump what the widget actually rendered — guessing
+            // from a bare "timed out" has already cost several CI round-trips.
+            let dump = expectation(description: "diagnostic dump")
+            webView.evaluateJavaScript(
+                """
+                (function () {
+                  var btns = Array.prototype.slice.call(document.querySelectorAll('.iq-btn'))
+                    .map(function (b) { return b.textContent.trim(); });
+                  return JSON.stringify({
+                    mounted: !!(window.AddressIQ && window.AddressIQ.IQCollect),
+                    errors: window.__errs || [],
+                    bridgeCalls: window.__calls || [],
+                    buttons: btns,
+                    bodyText: (document.body.innerText || '').slice(0, 400)
+                  });
+                })()
+                """
+            ) { value, error in
+                XCTFail("""
+                getLocation never arrived. Widget state:
+                \(value.map { "\($0)" } ?? "evaluateJavaScript failed: \(String(describing: error))")
+                """)
+                dump.fulfill()
+            }
+            wait(for: [dump], timeout: 10)
+        }
     }
 
     // MARK: - helpers
