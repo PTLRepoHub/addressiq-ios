@@ -30,7 +30,7 @@ struct AddressIQSampleApp: App {
 final class AppModel: ObservableObject {
     // Login inputs.
     @Published var apiKey: String = "aiq_test_demo_bank_seed01"
-    @Published var environment: AddressIQEnvironment = .sandbox
+    @Published var environment: AddressIQEnvironment = .staging
     @Published var appUserId: String = "cust_sample_001"
 
     // Demo / local-dev options.

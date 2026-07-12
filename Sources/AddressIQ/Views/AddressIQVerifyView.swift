@@ -28,17 +28,35 @@ public struct AddressIQVerifyView: View {
     let onCancelled: () -> Void
     let onFailed: (AddressIQVerifyError) -> Void
 
-    // There is deliberately NO default remote widget URL.
+    // How the widget is loaded: CDN-first, SRI-pinned, bundled fallback.
     //
-    // The widget ships as an SPM resource / pod resource bundle
-    // (Resources/iqcollect.js). If it is missing the package is broken, and
-    // silently fetching a script from a CDN into this WKWebView — alongside the
-    // session config — would turn a packaging bug into remote code execution.
-    // We fail closed instead, surfacing WIDGET_BUNDLE_MISSING via `onFailed`.
+    // The widget is fetched from the per-environment CDN at the immutable path
+    // `{cdn}/v{x.y.z}/iqcollect.js`, with a Subresource Integrity `integrity`
+    // pin on the <script> tag. Both the version and the hash are baked into
+    // BuildConfig at publish time from `.widget-version` / `.widget-integrity`,
+    // which the web repo writes into this repo on every web release. WKWebView
+    // enforces SRI, so bytes that do not match the pin do not execute: the CDN
+    // is a delivery channel, not a trust boundary, and a compromised or swapped
+    // asset is inert rather than remote code execution. This is precisely why
+    // the CDN publishes immutable /v{x.y.z}/ paths — a mutable "latest" URL
+    // could not carry a build-time hash.
     //
-    // `widgetURL` remains supported as an explicit developer override for
-    // serving a local bundle during development (see docs — run the demo proxy
-    // with `MOCK_UPSTREAM=1` and serve `dist/iqcollect.js`).
+    // The bundled widget (SPM resource / pod resource bundle,
+    // Resources/iqcollect.js) is still embedded in the page and is injected by
+    // `__iqWidgetFallback()` if the remote script fails for ANY reason — CDN
+    // outage, offline device, or a failed integrity check. Users are never
+    // stranded on a blank sheet.
+    //
+    // If no pin has been published yet (empty version/integrity) or the
+    // environment is `.development`, the bundle is inlined directly — the
+    // pre-CDN behaviour, unchanged. If neither source is available the SDK
+    // still fails closed, surfacing WIDGET_BUNDLE_MISSING via `onFailed`; it
+    // will not load an unpinned remote script.
+    //
+    // `widgetURL` remains supported as an explicit developer override, taking
+    // precedence over both, for serving a local bundle during development (see
+    // docs — run the demo proxy with `MOCK_UPSTREAM=1` and serve
+    // `dist/iqcollect.js`).
 
     public init(
         apiKey: String,
@@ -83,6 +101,8 @@ public struct AddressIQVerifyView: View {
             appUserId: appUserId,
             apiURL: environment.defaultApiUrl,
             widgetURL: widgetURL,
+            environment: environment,
+            cdnBaseURL: environment.defaultCdnUrl,
             businessName: businessName,
             primaryColorHex: nil,
             onCompleted: onCompleted,

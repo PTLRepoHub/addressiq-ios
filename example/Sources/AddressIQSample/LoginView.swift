@@ -21,7 +21,7 @@ struct LoginView: View {
                 Section("Environment") {
                     Picker("Environment", selection: $model.environment) {
                         Text("Development").tag(AddressIQEnvironment.development)
-                        Text("Sandbox").tag(AddressIQEnvironment.sandbox)
+                        Text("Staging").tag(AddressIQEnvironment.staging)
                         Text("Production").tag(AddressIQEnvironment.production)
                     }
                     .pickerStyle(.segmented)
@@ -31,7 +31,7 @@ struct LoginView: View {
                 } header: {
                     Text("Local development")
                 } footer: {
-                    Text("Select the Development environment to run against a local backend on http://localhost:3355 (the simulator reaches the host via localhost).")
+                    Text("Select the Development environment to run against a local backend on http://localhost:4000 (the simulator reaches the host via localhost).")
                 }
                 Section {
                     Button {

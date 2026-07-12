@@ -24,29 +24,22 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Bake production API URL
+      # Bakes the staging + production hosts (api / ingest / cdn) into
+      # BuildConfig.swift. `development` is not baked — it's a local concern.
+      #
+      # --strict: a release with any variable unset FAILS. The previous version
+      # of this step printed "unset; keeping checked-in default" and published
+      # anyway, so a misconfigured release shipped a pod pointing at whatever
+      # was committed. A release that cannot see its config must not guess.
+      - name: Bake build config (staging + production)
         env:
-          ADDRESSIQ_API_URL: ${{ vars.ADDRESSIQ_API_URL }}
-          ADDRESSIQ_INGEST_URL: ${{ vars.ADDRESSIQ_INGEST_URL }}
-        run: |
-          if [ -n "$ADDRESSIQ_API_URL" ]; then
-            sed -i '' \
-              "s|static let apiURL = \".*\"|static let apiURL = \"${ADDRESSIQ_API_URL}\"|" \
-              Sources/AddressIQ/Generated/BuildConfig.swift
-            echo "Baked ADDRESSIQ_API_URL into BuildConfig.swift"
-          else
-            echo "ADDRESSIQ_API_URL unset; keeping checked-in default"
-          fi
-          if [ -n "$ADDRESSIQ_INGEST_URL" ]; then
-            sed -i '' \
-              "s|static let ingestURL = \".*\"|static let ingestURL = \"${ADDRESSIQ_INGEST_URL}\"|" \
-              Sources/AddressIQ/Generated/BuildConfig.swift
-            echo "Baked ADDRESSIQ_INGEST_URL into BuildConfig.swift"
-          else
-            echo "ADDRESSIQ_INGEST_URL unset; keeping checked-in default"
-          fi
-          grep 'static let apiURL' Sources/AddressIQ/Generated/BuildConfig.swift
-          grep 'static let ingestURL' Sources/AddressIQ/Generated/BuildConfig.swift
+          STAGING_ADDRESSIQ_API_BASE_URL: ${{ vars.STAGING_ADDRESSIQ_API_BASE_URL }}
+          STAGING_ADDRESSIQ_INGEST_BASE_URL: ${{ vars.STAGING_ADDRESSIQ_INGEST_BASE_URL }}
+          STAGING_ADDRESSIQ_CDN_BASE_URL: ${{ vars.STAGING_ADDRESSIQ_CDN_BASE_URL }}
+          PROD_ADDRESSIQ_API_BASE_URL: ${{ vars.PROD_ADDRESSIQ_API_BASE_URL }}
+          PROD_ADDRESSIQ_INGEST_BASE_URL: ${{ vars.PROD_ADDRESSIQ_INGEST_BASE_URL }}
+          PROD_ADDRESSIQ_CDN_BASE_URL: ${{ vars.PROD_ADDRESSIQ_CDN_BASE_URL }}
+        run: scripts/bake-build-config.sh --strict
       - name: Lint / push
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
