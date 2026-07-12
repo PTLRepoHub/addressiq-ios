@@ -146,7 +146,13 @@ final class AddressIQWebBridgeTests: XCTestCase {
         """
         webView.loadHTMLString(html, baseURL: URL(string: "https://127.0.0.1:1"))
 
-        let result = XCTWaiter().wait(for: [gotGetLocation], timeout: 25)
+        // 60s, not 25s. The happy path is slow on a CI runner — the widget waits
+        // up to MAPS_LOAD_TIMEOUT_MS (6s) for Google Maps, the auto-driver polls
+        // every 350ms, and WebKit start-up in the simulator is not free. It has
+        // been observed taking ~16s on CI against a 25s budget, i.e. passing or
+        // failing on runner speed alone. This test is not measuring latency, so
+        // give it room; a genuine stall still fails, and now dumps why.
+        let result = XCTWaiter().wait(for: [gotGetLocation], timeout: 60)
         if result != .completed {
             // The flow stalled. Dump what the widget actually rendered — guessing
             // from a bare "timed out" has already cost several CI round-trips.
