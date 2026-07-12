@@ -24,6 +24,19 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Bake production API URL
+        env:
+          ADDRESSIQ_API_URL: ${{ vars.ADDRESSIQ_API_URL }}
+        run: |
+          if [ -n "$ADDRESSIQ_API_URL" ]; then
+            sed -i '' \
+              "s|static let apiURL = \".*\"|static let apiURL = \"${ADDRESSIQ_API_URL}\"|" \
+              Sources/AddressIQ/Generated/BuildConfig.swift
+            echo "Baked ADDRESSIQ_API_URL into BuildConfig.swift"
+          else
+            echo "ADDRESSIQ_API_URL unset; keeping checked-in default"
+          fi
+          grep 'static let apiURL' Sources/AddressIQ/Generated/BuildConfig.swift
       - name: Lint / push
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}

@@ -14,14 +14,13 @@ final class AddressIQTests: XCTestCase {
         XCTAssertNotEqual(sandbox, production)
     }
 
-    func testConfigResolvesEnvironmentUrlWhenNoOverride() {
+    func testConfigResolvesEnvironmentUrl() {
         let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .sandbox)
         XCTAssertEqual(config.resolvedApiUrl, AddressIQEnvironment.sandbox.defaultApiUrl)
     }
 
-    func testConfigHonorsExplicitOverride() {
-        let override = URL(string: "https://proxy.partner.example")!
-        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .production, apiUrl: override)
-        XCTAssertEqual(config.resolvedApiUrl, override)
+    func testDevelopmentEnvironmentResolvesLocalhost() {
+        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .development)
+        XCTAssertEqual(config.resolvedApiUrl, URL(string: "http://localhost:3355")!)
     }
 }

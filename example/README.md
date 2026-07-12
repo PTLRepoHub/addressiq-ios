@@ -112,8 +112,8 @@ On launch you land on **AddressIQ Sample** with:
 
 - **API key** and **App user ID** — your test credentials (defaults:
   `aiq_test_demo_bank_seed01` / `cust_sample_001`).
-- **Environment** — Sandbox or Production (the hosted APIs).
-- **Local API URL** *(optional)* — point at a local backend instead (see §5).
+- **Environment** — Development (local backend on `http://localhost:3355`),
+  Sandbox, or Production (the hosted APIs). See §5 for local runs.
 - **Business name** — a **fallback only**; branding (name, logo, colours, button
   style, corner radius) normally comes from the backend via `/widget/config`,
   set in the dashboard under **Settings → Branding → Widget**.
@@ -125,20 +125,21 @@ opens the Hub.
 
 ## 5. Run against the local backend
 
-Point **Local API URL** at your machine. Two options:
+Select the **Development** environment on the login screen. The SDK resolves it
+to the compiled-in `http://localhost:3355`, so start a backend on that port:
 
-- **The real API directly:** `http://localhost:4000` (start it with
-  `cd geo-tagging && docker compose up -d`).
-- **The sample Node server** (`addressiq-node-backend`): `http://localhost:3355`
+- **The sample Node server** (`addressiq-node-backend`) on `:3355`:
   ```bash
   cd addressiq-node-backend
   node server.js               # proxies to the real API on :4000
   MOCK_UPSTREAM=1 node server.js   # …or fully offline canned data
   ```
+  (The real API itself runs on `:4000` — `cd geo-tagging && docker compose up -d`.)
 
 > On the **simulator**, `localhost` reaches your Mac, so this works as-is. On a
-> **real device**, use your Mac's LAN IP and allow the plain-HTTP address in App
-> Transport Security.
+> **real device**, `localhost` will not reach your Mac; expose the backend on
+> your Mac's LAN IP. Because the environment URL is compiled in, a device run
+> against a non-localhost host is out of scope for this sample.
 
 ---
 

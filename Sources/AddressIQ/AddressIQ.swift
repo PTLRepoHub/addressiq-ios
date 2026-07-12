@@ -32,40 +32,42 @@ public enum AddressIQLifecycleState: String {
 public struct AddressIQConfig {
     public let apiKey: String
     public let environment: AddressIQEnvironment
-    /// Optional override for the API base URL. Production integrations
-    /// should leave this nil — the SDK resolves the right URL from
-    /// `environment`. Override only when routing through a partner
-    /// proxy or running against a hermetic test backend.
-    public let apiUrl: URL?
 
     public init(
         apiKey: String,
-        environment: AddressIQEnvironment = .production,
-        apiUrl: URL? = nil
+        environment: AddressIQEnvironment = .production
     ) {
         self.apiKey = apiKey
         self.environment = environment
-        self.apiUrl = apiUrl
     }
 
-    /// Effective API URL: explicit override if provided, otherwise the
-    /// env default.
+    /// Effective API URL, resolved entirely from `environment`. The SDK
+    /// never accepts a caller-supplied URL — production and sandbox point
+    /// at the hosted backends, `.development` at the local dev backend.
     public var resolvedApiUrl: URL {
-        return apiUrl ?? environment.defaultApiUrl
+        return environment.defaultApiUrl
     }
 }
 
 public enum AddressIQEnvironment: String {
     case sandbox
     case production
+    /// Local development backend. The compiled-in URL targets a backend
+    /// running on the host machine; the iOS simulator reaches it via
+    /// `localhost`. Never ship a build configured for `.development`.
+    case development
 
-    /// Public API base URL the SDK resolves to when no override is set.
+    /// Public API base URL the SDK resolves to for this environment.
     public var defaultApiUrl: URL {
         switch self {
         case .production:
-            return URL(string: "https://api.addressiqpro.com")!
+            // Baked in at publish time from the `ADDRESSIQ_API_URL` GitHub
+            // variable; falls back to the literal if the value fails to parse.
+            return URL(string: BuildConfig.apiURL) ?? URL(string: "https://api.addressiqpro.com")!
         case .sandbox:
             return URL(string: "https://api-staging.addressiqpro.com")!
+        case .development:
+            return URL(string: "http://localhost:3355")!
         }
     }
 }

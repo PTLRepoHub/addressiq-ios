@@ -24,7 +24,6 @@ public struct AddressIQVerifyView: View {
     let termsUrl: URL?
     let businessName: String?
     let widgetURL: URL?
-    let apiUrlOverride: URL?
     let onCompleted: (AddressIQVerifyResult) -> Void
     let onCancelled: () -> Void
     let onFailed: (AddressIQVerifyError) -> Void
@@ -54,7 +53,6 @@ public struct AddressIQVerifyView: View {
         termsUrl: URL? = nil,
         businessName: String? = nil,
         widgetURL: URL? = nil,
-        apiUrlOverride: URL? = nil,
         onCompleted: @escaping (AddressIQVerifyResult) -> Void,
         onCancelled: @escaping () -> Void = {},
         onFailed: @escaping (AddressIQVerifyError) -> Void = { _ in }
@@ -71,7 +69,6 @@ public struct AddressIQVerifyView: View {
         self.termsUrl = termsUrl
         self.businessName = businessName
         self.widgetURL = widgetURL
-        self.apiUrlOverride = apiUrlOverride
         self.onCompleted = onCompleted
         self.onCancelled = onCancelled
         self.onFailed = onFailed
@@ -84,7 +81,7 @@ public struct AddressIQVerifyView: View {
         AddressIQWebFlowView(
             apiKey: apiKey,
             appUserId: appUserId,
-            apiURL: apiUrlOverride ?? environment.defaultApiUrl,
+            apiURL: environment.defaultApiUrl,
             widgetURL: widgetURL,
             businessName: businessName,
             primaryColorHex: nil,

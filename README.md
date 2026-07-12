@@ -121,17 +121,24 @@ The collect UI surfaces `AddressIQVerifyError` (`code`, `message`,
 
 ## Environment
 
-`AddressIQEnvironment.production` → `https://api.addressiqpro.com`;
-`.sandbox` → `https://api-staging.addressiqpro.com`. Override the base URL only
-for a partner proxy or hermetic test backend via `AddressIQConfig(apiUrl:)`.
+`AddressIQEnvironment.production` → `https://api.addressiqpro.com` (baked into
+published pods at release time from the `ADDRESSIQ_API_URL` GitHub variable;
+the checked-in default is used for local builds and tests);
+`.sandbox` → `https://api-staging.addressiqpro.com`;
+`.development` → `http://localhost:3355` (a backend running on your host
+machine; the iOS simulator reaches it via `localhost`).
+
+The base URL is resolved entirely from `environment` — integrators never pass
+a URL. Use `.development` to run against a local backend; never ship a
+`.development` build.
 
 ## Example app
 
 A SwiftUI sample (iOS 15+) demonstrating the full screen canon. After
 **Login**, the app shows a five-tab interface:
 
-- **Login** — environment picker (sandbox/production) + appUserId field →
-  `initialize(config:)` + `setUser(_:)`.
+- **Login** — environment picker (development/sandbox/production) + appUserId
+  field → `initialize(config:)` + `setUser(_:)`.
 - **Verify** — human-labelled hub: a **Collect Address** button that opens the
   `AddressIQVerifyView` collect UI as a sheet, plus **Digital / Physical /
   Digital + Physical** buttons that call the SDK API. A lifecycle status chip
