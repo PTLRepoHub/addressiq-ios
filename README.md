@@ -121,21 +121,39 @@ The collect UI surfaces `AddressIQVerifyError` (`code`, `message`,
 
 ## Environment
 
-`AddressIQEnvironment` offers `.production`, `.sandbox`, and `.development`.
+`AddressIQEnvironment` offers `.production`, `.staging`, and `.development`.
 Integrators simply choose one; `.development` targets a backend running on your
 host machine (the iOS simulator reaches it via `localhost`).
 
+`.staging` is the canonical name for pre-production
+(`Sources/AddressIQ/AddressIQ.swift:73`), matching the other AddressIQ SDKs.
+**`.sandbox` is deprecated but still accepted**: it is an alias that resolves
+identically (`AddressIQ.swift:83-84`), and the legacy `"sandbox"` raw string
+still decodes to `.staging` (`AddressIQ.swift:93-100`), so config read from a
+plist/JSON keeps working. Prefer `.staging` in new code.
+
 The base URLs — including the dedicated host used for transit-event batch
 ingestion — are resolved entirely from `environment`; integrators never pass a
-URL. Use `.development` to run against a local backend; never ship a
-`.development` build.
+URL (`resolvedApiUrl` / `resolvedIngestUrl`, `AddressIQ.swift:47-56`). The
+`production` and `staging` hosts are baked in at publish time from six GitHub
+repository variables (see [`docs/RELEASE.md` §3](docs/RELEASE.md)); `development`
+is a compile-time literal (`http://localhost:4000`). Use `.development` to run
+against a local backend; never ship a `.development` build.
+
+`AddressIQConfig.resolvedCdnUrl` (`AddressIQ.swift:65-67`) exposes the CDN base
+URL for the environment. It is **config only — nothing in the SDK fetches from
+it.** The verify widget ships bundled (`Resources/iqcollect.js`), is injected
+inline, and fails closed with `WIDGET_BUNDLE_MISSING` via `onFailed` if the
+resource is absent (`Sources/AddressIQ/Views/AddressIQWebFlowView.swift:51`) —
+it never falls back to a remote script.
 
 ## Example app
 
 A SwiftUI sample (iOS 15+) demonstrating the full screen canon. After
 **Login**, the app shows a five-tab interface:
 
-- **Login** — environment picker (development/sandbox/production) + appUserId
+- **Login** — environment picker (development/staging/production; the sample
+  still labels staging "Sandbox", `example/Sources/AddressIQSample/LoginView.swift:24`) + appUserId
   field → `initialize(config:)` + `setUser(_:)`.
 - **Verify** — human-labelled hub: a **Collect Address** button that opens the
   `AddressIQVerifyView` collect UI as a sheet, plus **Digital / Physical /
@@ -195,7 +213,7 @@ xcrun simctl location booted set 6.5244,3.3792
 The map key is provisioned by the platform and delivered to the widget via
 `GET /api/v1/widget/config` — integrators do not supply a Google Maps key. The
 API key comes from the **Login** screen (pre-filled with
-`aiq_test_demo_bank_seed01`, `.sandbox`). The
+`aiq_test_demo_bank_seed01`, staging). The
 generated app's `Info.plist` **must** include
 `NSLocationWhenInUseUsageDescription`,
 `NSLocationAlwaysAndWhenInUseUsageDescription` and `UIBackgroundModes: [location]`

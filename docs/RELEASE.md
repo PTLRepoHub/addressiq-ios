@@ -41,9 +41,10 @@ The flow spans two workflows and is driven entirely by
    / `.release-please-manifest.json`, and **pushes tag `vX.Y.Z`**
    (`release-please.yml:3-9`).
 4. The tag push triggers `release.yml` (`on: push: tags: ["v*.*.*"]`,
-   `release.yml:11-13`), which lints and runs `pod trunk push AddressIQ.podspec`
-   (`release.yml:38-39`). SPM needs no publish step — the tag is already the
-   release (`release.yml:41-42`).
+   `release.yml:11-13`), which **bakes the build config** (`release.yml:34-42`,
+   see §3), then lints and runs `pod trunk push AddressIQ.podspec`
+   (`release.yml:43-56`). SPM needs no publish step — the tag is already the
+   release (`release.yml:57-58`).
 
 **Do not tag manually.** Tags come only from merging the release PR. A key
 detail: GitHub does not fire workflows for events made with the default
@@ -53,15 +54,70 @@ the tag with it — an App-authored tag push *does* trigger `release.yml`
 changelog bump and can desync `version.txt`.
 
 `release.yml` also supports a manual `workflow_dispatch` **dry run** that only
-runs `pod lib lint` (`release.yml:14-19, 32-37`).
+runs `pod lib lint` (`release.yml:14-19, 47-53`).
 
-## 3. Required secrets
+## 3. Build-time configuration (the six repo variables)
+
+The hosts the SDK talks to are **baked into the source at publish time**, not
+read at runtime. `scripts/bake-build-config.sh` regenerates
+`Sources/AddressIQ/Generated/BuildConfig.swift` **wholesale** from six GitHub
+**repository variables** — three per shippable environment:
+
+| Staging | Production |
+|---|---|
+| `STAGING_ADDRESSIQ_API_BASE_URL` | `PROD_ADDRESSIQ_API_BASE_URL` |
+| `STAGING_ADDRESSIQ_INGEST_BASE_URL` | `PROD_ADDRESSIQ_INGEST_BASE_URL` |
+| `STAGING_ADDRESSIQ_CDN_BASE_URL` | `PROD_ADDRESSIQ_CDN_BASE_URL` |
+
+These **replace** the old `ADDRESSIQ_API_URL` / `ADDRESSIQ_INGEST_URL` pair.
+They produce the six constants in `BuildConfig.swift`
+(`bake-build-config.sh:85-91`), which `AddressIQEnvironment` reads
+(`Sources/AddressIQ/AddressIQ.swift:107-145`).
+
+`development` is **not** baked: it points at a backend on the host machine
+(`http://localhost:4000`) and stays a compile-time literal
+(`AddressIQ.swift:113-114`). Never ship a `.development` build.
+
+### ⚠️ Behaviour change: a release now FAILS on missing config
+
+The old step `sed`'d each key and, when a variable was unset, printed
+`"unset; keeping checked-in default"` **and published anyway** — so a
+misconfigured release shipped a pod pointing at whatever URL happened to be
+committed. CI now runs the baker with `--strict`
+(`release.yml:34-42`), which **hard-fails the release** if *any* of the six
+variables is unset (`bake-build-config.sh:59-63`).
+
+**Action required:** all six variables must be set as GitHub repository
+variables *before the next release*, or the release job errors out.
+
+### Local vs CI
+
+| | Command | Unset variable |
+|---|---|---|
+| **Local** | `scripts/bake-build-config.sh` | falls back to the checked-in safe public defaults (`bake-build-config.sh:31-38`) |
+| **CI (release)** | `scripts/bake-build-config.sh --strict` | **hard error**, release fails |
+
+The values checked into `BuildConfig.swift` are those same public defaults, so a
+plain `swift build` / `swift test` resolves real hosts with no substitution —
+you only need to run the baker locally if you want to point a build elsewhere.
+Trailing slashes on a variable are stripped (`bake-build-config.sh:55-56`).
+
+### `sandbox` → `staging`
+
+The pre-production environment is now canonically **`staging`**
+(`AddressIQ.swift:73`), matching the `STAGING_*` variables and the other
+AddressIQ SDKs. `.sandbox` still compiles — it is a deprecated alias
+(`AddressIQ.swift:83-84`) — and the legacy `"sandbox"` raw string is still
+accepted by a custom `init?(rawValue:)` (`AddressIQ.swift:93-100`), so anything
+reconstructing an environment from a string keeps working.
+
+## 4. Required secrets
 
 | Secret | Used by | Source |
 |---|---|---|
 | `ADDRESSIQ_BOT_APP_ID` | `release-please.yml:33` | GitHub App on `PTLRepoHub` (App ID) |
 | `ADDRESSIQ_BOT_PRIVATE_KEY` | `release-please.yml:34` | GitHub App private key (`.pem`) |
-| `COCOAPODS_TRUNK_TOKEN` | `release.yml:29` | `pod trunk register <email>` token |
+| `COCOAPODS_TRUNK_TOKEN` | `release.yml:45` | `pod trunk register <email>` token |
 
 The GitHub App is **one** org-owned App on `PTLRepoHub`, installed on the release
 repos, with only `contents: write` + `pull_requests: write`
@@ -71,7 +127,7 @@ triggers `release.yml`; do **not** substitute a `gh auth token`.
 The CocoaPods token comes from `pod trunk register <email>` on a developer
 machine, then stored as the repo secret (`RELEASE-ENGINEERING.md §4.E`).
 
-## 4. Versioning rules
+## 5. Versioning rules
 
 release-please derives the bump from commit types (`release-type: simple`,
 `release-please-config.json:8`):
@@ -91,13 +147,13 @@ Because both channels resolve from the git tag:
   git remote (`github.com/PTLRepoHub/addressiq-ios.git`), and the tag `v#{version}`
   must exist, or `pod install` / SPM resolution fails to fetch.
 - The podspec version is injected by CI from the tag
-  (`POD_VERSION="${GITHUB_REF_NAME#v}"`, `release.yml:32`), read at
+  (`POD_VERSION="${GITHUB_REF_NAME#v}"`, `release.yml:48`), read at
   `AddressIQ.podspec:5`. It falls back to `0.0.0` for local lint.
 
-## 5. Local validation
+## 6. Local validation
 
 Before relying on CI you can lint the pod locally (this is exactly what the
-dry-run path runs, `release.yml:37`):
+dry-run path runs, `release.yml:53`):
 
 ```sh
 pod lib lint AddressIQ.podspec --allow-warnings
@@ -109,7 +165,7 @@ mirroring `Package.swift:22`) and ships the `iqcollect.js` resource bundle
 compilation gaps in those. For SPM, `swift build` / `swift test` validates the
 package.
 
-## 6. One-time setup
+## 7. One-time setup
 
 - **CocoaPods trunk**: `pod trunk register <email>`, then store the resulting
   token as `COCOAPODS_TRUNK_TOKEN`. The pod name `AddressIQ` must be unclaimed on

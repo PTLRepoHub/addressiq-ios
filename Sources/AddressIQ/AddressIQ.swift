@@ -54,42 +54,92 @@ public struct AddressIQConfig {
     public var resolvedIngestUrl: URL {
         return environment.defaultIngestUrl
     }
+
+    /// Effective CDN base URL for this environment.
+    ///
+    /// The verify widget is loaded from here at the immutable, SRI-pinned path
+    /// `{cdn}/v{BuildConfig.widgetVersion}/iqcollect.js`, falling back to the
+    /// bundled `Resources/iqcollect.js` on any failure. See AddressIQVerifyView
+    /// for the full model.
+    public var resolvedCdnUrl: URL {
+        return environment.defaultCdnUrl
+    }
 }
 
 public enum AddressIQEnvironment: String {
-    case sandbox
+    /// Pre-production. Named `staging` across all AddressIQ SDKs and matching
+    /// the `STAGING_*` build variables.
+    case staging
     case production
     /// Local development backend. The compiled-in URL targets a backend
     /// running on the host machine; the iOS simulator reaches it via
-    /// `localhost`. Never ship a build configured for `.development`.
+    /// `localhost`. Deliberately NOT baked from CI — it is a local-only
+    /// concern. Never ship a build configured for `.development`.
     case development
 
+    /// Former name for ``staging``. Retained so existing integrators keep
+    /// compiling; resolves identically.
+    @available(*, deprecated, renamed: "staging")
+    public static let sandbox = AddressIQEnvironment.staging
+
+    /// Accepts the legacy `"sandbox"` raw value as an alias for ``staging``.
+    ///
+    /// The static `sandbox` alias above only covers source-level `.sandbox`.
+    /// This enum has a `String` raw value, so anything that reconstructs an
+    /// environment from a string — a decoded config, a host app reading its
+    /// own plist, a bridge from JS — would otherwise get `nil` back after the
+    /// rename and silently fall through to a default. Map the old spelling.
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "staging", "sandbox": self = .staging
+        case "production": self = .production
+        case "development": self = .development
+        default: return nil
+        }
+    }
+
     /// Public API base URL the SDK resolves to for this environment.
+    ///
+    /// `production` and `staging` are baked in at publish time from the
+    /// `PROD_ADDRESSIQ_API_BASE_URL` / `STAGING_ADDRESSIQ_API_BASE_URL` GitHub variables; each
+    /// falls back to its checked-in literal if the baked value fails to parse.
     public var defaultApiUrl: URL {
         switch self {
         case .production:
-            // Baked in at publish time from the `ADDRESSIQ_API_URL` GitHub
-            // variable; falls back to the literal if the value fails to parse.
-            return URL(string: BuildConfig.apiURL) ?? URL(string: "https://api.addressiqpro.com")!
-        case .sandbox:
-            return URL(string: "https://api-staging.addressiqpro.com")!
+            return URL(string: BuildConfig.prodApiURL) ?? URL(string: "https://api.addressiqpro.com")!
+        case .staging:
+            return URL(string: BuildConfig.stagingApiURL) ?? URL(string: "https://api-staging.addressiqpro.com")!
         case .development:
-            return URL(string: "http://localhost:3355")!
+            return URL(string: "http://localhost:4000")!
         }
     }
 
     /// Ingest base URL the SDK resolves to for this environment. Transit-event
-    /// batches post here rather than to `defaultApiUrl`.
+    /// batches post here rather than to `defaultApiUrl`. Baked from
+    /// `PROD_ADDRESSIQ_INGEST_BASE_URL` / `STAGING_ADDRESSIQ_INGEST_BASE_URL`.
     public var defaultIngestUrl: URL {
         switch self {
         case .production:
-            // Baked in at publish time from the `ADDRESSIQ_INGEST_URL` GitHub
-            // variable; falls back to the literal if the value fails to parse.
-            return URL(string: BuildConfig.ingestURL) ?? URL(string: "https://ingest-api.addressiqpro.com")!
-        case .sandbox:
-            return URL(string: "https://ingest-api-staging.addressiqpro.com")!
+            return URL(string: BuildConfig.prodIngestURL) ?? URL(string: "https://ingest-api.addressiqpro.com")!
+        case .staging:
+            return URL(string: BuildConfig.stagingIngestURL) ?? URL(string: "https://ingest-api-staging.addressiqpro.com")!
         case .development:
-            return URL(string: "http://localhost:3355")!
+            return URL(string: "http://localhost:4000")!
+        }
+    }
+
+    /// CDN base URL for this environment. Baked from `PROD_ADDRESSIQ_CDN_BASE_URL` /
+    /// `STAGING_ADDRESSIQ_CDN_BASE_URL`. See ``AddressIQConfig/resolvedCdnUrl`` — the
+    /// verify widget is loaded from here (SRI-pinned) with the bundled asset as
+    /// the fallback. `.development` never loads remotely.
+    public var defaultCdnUrl: URL {
+        switch self {
+        case .production:
+            return URL(string: BuildConfig.prodCdnURL) ?? URL(string: "https://cdn.addressiqpro.com")!
+        case .staging:
+            return URL(string: BuildConfig.stagingCdnURL) ?? URL(string: "https://cdn-staging.addressiqpro.com")!
+        case .development:
+            return URL(string: "http://localhost:4000")!
         }
     }
 }

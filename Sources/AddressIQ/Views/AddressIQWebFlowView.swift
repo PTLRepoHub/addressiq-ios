@@ -20,9 +20,14 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     let apiKey: String
     let appUserId: String
     let apiURL: URL
-    /// Explicit developer override. `nil` means "use the bundled widget";
-    /// there is no remote default. See AddressIQVerifyView.
+    /// Explicit developer override. Takes precedence over BOTH the CDN and the
+    /// bundled widget. `nil` means "resolve normally" — see `widgetScriptTag`.
     let widgetURL: URL?
+    /// Which environment we resolved from. `.development` never loads remotely.
+    let environment: AddressIQEnvironment
+    /// CDN base for this environment (no trailing slash). The immutable widget
+    /// lives at `{cdnBaseURL}/v{version}/iqcollect.js`.
+    let cdnBaseURL: URL?
     let businessName: String?
     let primaryColorHex: String?
     let onCompleted: (AddressIQVerifyResult) -> Void
@@ -44,8 +49,8 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         context.coordinator.webView = webView
         context.coordinator.observeForeground()
 
-        // Fail closed: with no bundled widget and no explicit override there is
-        // nothing safe to load. Never fall back to a remote script.
+        // Fail closed: with no CDN pin, no bundled widget and no explicit
+        // override there is nothing to load. Never load an unpinned script.
         guard let document = htmlDocument() else {
             onFailed(AddressIQVerifyError(
                 code: "WIDGET_BUNDLE_MISSING",
@@ -65,9 +70,9 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     /// Inline page that mounts the widget. `locationProvider` is intentionally
     /// omitted so the widget auto-selects its `BridgeLocationProvider` (native
     /// owns Always/Precise). The bridge is detected via `window.webkit`.
-    /// Returns `nil` when neither a bundled widget nor an explicit `widgetURL`
-    /// override is available — the caller then fails closed.
-    private func htmlDocument() -> String? {
+    /// Returns `nil` when no widget source at all resolves — the caller then
+    /// fails closed with `WIDGET_BUNDLE_MISSING`.
+    func htmlDocument() -> String? {
         // Business identity (name/logo/colour) is fetched by the widget from the
         // backend (tenant behind the API key). Only forward a client-supplied
         // fallback when the integrator explicitly provided one.
@@ -84,15 +89,14 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         if !business.isEmpty { cfg["business"] = business }
         let cfgJSON = (try? JSONSerialization.data(withJSONObject: cfg))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        // Prefer the bundled widget (works offline, version-pinned). Honour an
-        // explicit developer override. With neither, fail closed — never reach
-        // for a remote script.
-        let widgetScript: String
-        if let bundled = Self.bundledWidgetJS() {
-            widgetScript = "<script>\(bundled)</script>"
-        } else if let widgetURL {
-            widgetScript = "<script src=\"\(widgetURL.absoluteString)\"></script>"
-        } else {
+        guard let widgetScript = Self.widgetScriptTag(
+            widgetURL: widgetURL,
+            environment: environment,
+            cdnBaseURL: cdnBaseURL,
+            widgetVersion: BuildConfig.widgetVersion,
+            widgetIntegrity: BuildConfig.widgetIntegrity,
+            bundledJS: Self.bundledWidgetJS()
+        ) else {
             return nil
         }
         return """
@@ -109,6 +113,90 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         </script>
         </body></html>
         """
+    }
+
+    /// Builds the `<script>` markup that brings the widget into the page.
+    ///
+    /// Resolution order (see the model note in AddressIQVerifyView):
+    ///   1. `widgetURL` — explicit developer override, wins over everything.
+    ///   2. CDN, if every precondition holds: a shippable environment, a CDN
+    ///      base, and BOTH a baked `widgetVersion` and `widgetIntegrity`. The
+    ///      tag carries an SRI `integrity` pin, which WebKit enforces: a
+    ///      tampered or mismatched bundle refuses to execute and fires
+    ///      `onerror`, which drops us to (3). The bundled widget is embedded in
+    ///      the same page as `__iqWidgetFallback()` — defined BEFORE the remote
+    ///      tag — so a CDN outage, an offline device, or an SRI failure all land
+    ///      on the bundle rather than a blank sheet. On a clean CDN load the
+    ///      fallback is never invoked.
+    ///   3. Bundled widget inline, exactly as before the CDN existed.
+    /// Returns `nil` only when nothing is loadable: no override, preconditions
+    /// unmet, and no bundle. The caller fails closed.
+    ///
+    /// A blocking classic `<script>` runs (or errors) before the parser reaches
+    /// the next inline script, so by the time the mount script runs, either the
+    /// CDN bundle or the fallback has already defined `window.AddressIQ`.
+    static func widgetScriptTag(
+        widgetURL: URL?,
+        environment: AddressIQEnvironment,
+        cdnBaseURL: URL?,
+        widgetVersion: String,
+        widgetIntegrity: String,
+        bundledJS: String?
+    ) -> String? {
+        if let widgetURL {
+            return "<script src=\"\(widgetURL.absoluteString)\"></script>"
+        }
+
+        // An empty bundle string is a missing bundle, not an empty widget —
+        // `<script></script>` would define no `window.AddressIQ` and hang the
+        // mount script instead of failing closed.
+        let bundledJS = (bundledJS?.isEmpty == false) ? bundledJS : nil
+
+        // The bundle is embedded as base64 rather than raw JS: it is spliced
+        // into a JS *string literal*, and the widget bundle legitimately
+        // contains quotes, backslashes and `</script>`-alike sequences that
+        // would otherwise terminate the literal (or the tag) early.
+        let fallback = bundledJS.map { js -> String in
+            let b64 = Data(js.utf8).base64EncodedString()
+            return """
+            <script>
+            function __iqWidgetFallback() {
+              if (window.AddressIQ) return;
+              var src = new TextDecoder().decode(
+                Uint8Array.from(atob("\(b64)"), function (c) { return c.charCodeAt(0); })
+              );
+              var s = document.createElement('script');
+              s.textContent = src;
+              document.head.appendChild(s);
+            }
+            </script>
+            """
+        }
+
+        let cdnBase = cdnBaseURL?.absoluteString.hasSuffix("/") == true
+            ? String(cdnBaseURL!.absoluteString.dropLast())
+            : cdnBaseURL?.absoluteString
+        let cdnUsable = environment != .development
+            && !(cdnBase ?? "").isEmpty
+            && !widgetVersion.isEmpty
+            && !widgetIntegrity.isEmpty
+
+        if cdnUsable, let cdnBase {
+            // `widgetVersion` is stored bare ("0.4.0"); the CDN's immutable
+            // paths are /v{x.y.z}/, so re-add the "v" here. Immutability is what
+            // makes the SRI pin viable at all — the bytes behind this URL can
+            // never change.
+            let src = "\(cdnBase)/v\(widgetVersion)/iqcollect.js"
+            let onerror = fallback != nil ? " onerror=\"__iqWidgetFallback()\"" : ""
+            return """
+            \(fallback ?? "")
+            <script src="\(src)" integrity="\(widgetIntegrity)" crossorigin="anonymous"\(onerror)></script>
+            """
+        }
+
+        // No CDN pin (or development): inline the bundle directly.
+        guard let bundledJS else { return nil }
+        return "<script>\(bundledJS)</script>"
     }
 
     /// The widget bundle shipped as a package resource, if present.

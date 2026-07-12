@@ -112,8 +112,8 @@ On launch you land on **AddressIQ Sample** with:
 
 - **API key** and **App user ID** — your test credentials (defaults:
   `aiq_test_demo_bank_seed01` / `cust_sample_001`).
-- **Environment** — Development (local backend on `http://localhost:3355`),
-  Sandbox, or Production (the hosted APIs). See §5 for local runs.
+- **Environment** — Development (local backend on `http://localhost:4000`),
+  Staging, or Production (the hosted APIs). See §5 for local runs.
 - **Business name** — a **fallback only**; branding (name, logo, colours, button
   style, corner radius) normally comes from the backend via `/widget/config`,
   set in the dashboard under **Settings → Branding → Widget**.
@@ -126,9 +126,9 @@ opens the Hub.
 ## 5. Run against the local backend
 
 Select the **Development** environment on the login screen. The SDK resolves it
-to the compiled-in `http://localhost:3355`, so start a backend on that port:
+to the compiled-in `http://localhost:4000`, so start a backend on that port:
 
-- **The sample Node server** (`addressiq-node-backend`) on `:3355`:
+- **The sample Node server** (`addressiq-node-backend`) on `:4000`:
   ```bash
   cd addressiq-node-backend
   node server.js               # proxies to the real API on :4000
