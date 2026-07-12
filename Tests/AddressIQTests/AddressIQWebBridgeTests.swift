@@ -32,6 +32,18 @@ final class AddressIQWebBridgeTests: XCTestCase {
 
         let gotGetLocation = expectation(description: "native received a getLocation request")
 
+        // The widget legitimately asks for a fix MORE THAN ONCE in a single run:
+        // collect-form auto-locates when the map step opens (guarded by
+        // `autoLocateTried`), and "Use my current location" asks again. Two
+        // requests arriving is correct behaviour, not a regression.
+        //
+        // XCTestExpectation traps on over-fulfilment by default, so the second
+        // request crashed the test with
+        //   *** Assertion failure in -[XCTestExpectation fulfill]
+        // even though the bridge round-trip had already succeeded. What this test
+        // asserts is "at least one getLocation round-trip works", so say that.
+        gotGetLocation.assertForOverFulfill = false
+
         // Stub the FULL bridge contract, not just `getLocation`. Before the
         // widget offers "Use my current location" it gates on `requestPermission`
         // and blocks with the button stuck on "Checking…" until the host answers.
