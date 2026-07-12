@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.5.0...v0.6.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* `AddressIQEnvironment.sandbox` is renamed to `.staging`. The old name is retained as a deprecated alias, and `init(rawValue: "sandbox")` still resolves to `.staging`, so existing integrators keep compiling.
+
+### Features
+
+* per-environment build config and CDN widget loading ([#13](https://github.com/PTLRepoHub/addressiq-ios/issues/13)) ([03c7b1f](https://github.com/PTLRepoHub/addressiq-ios/commit/03c7b1f8e2ecdba5a70230dc6ed034ed65bbf5a4))
+* **widget:** re-vendor iqcollect.js from web v0.5.1 ([#16](https://github.com/PTLRepoHub/addressiq-ios/issues/16)) ([6af9018](https://github.com/PTLRepoHub/addressiq-ios/commit/6af90187c4b444104ba74abf55adfac0bcd50dc7))
+
 ## [0.5.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.4.0...v0.5.0) (2026-07-12)
 
 
