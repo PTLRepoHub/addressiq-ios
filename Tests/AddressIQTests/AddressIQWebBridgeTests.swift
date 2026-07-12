@@ -95,13 +95,31 @@ final class AddressIQWebBridgeTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
 
-        // apiUrl points at a closed port so `listAddresses()` fails fast → the
-        // widget falls through to the collect flow (no server needed), whose
-        // address step exposes "Use my current location" → getLocation.
+        // This test exercises the BRIDGE, not the network — so stub `fetch` to
+        // reject immediately instead of pointing `apiUrl` at a closed port and
+        // hoping the connection fails fast.
+        //
+        // The old approach relied on `https://127.0.0.1:1` refusing instantly, so
+        // `listAddresses()` would fail and the widget would fall through to the
+        // collect flow. That holds on a dev machine but NOT on the CI runner, where
+        // the connection does not fail fast: the widget sat waiting, never reached
+        // the map step, never asked for a location, and the test timed out at 25s.
+        // (The earlier `XCTestExpectation fulfill` assertion was the same bug — a
+        // late request landing after the wait had already expired.)
+        //
+        // Rejecting every request makes the flow deterministic in any environment:
+        // no saved addresses → collect flow → map step → auto-locate → getLocation.
+        // Reference data (countries/states) also fails here, which is fine: the
+        // form degrades to free text by design (collect-form.ts:299-303).
         let cfg = ##"{"apiKey":"k","apiUrl":"https://127.0.0.1:1","appUserId":"u1","business":{"displayName":"Test Biz","primaryColor":"#111827"}}"##
         let html = """
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
         <body><div id="mount"></div>
+        <script>
+          window.fetch = function () {
+            return Promise.reject(new Error('network disabled in AddressIQWebBridgeTests'));
+          };
+        </script>
         <script>\(widgetJS)</script>
         <script>
           var c = new window.AddressIQ.IQCollect(document.getElementById('mount'), \(cfg));
