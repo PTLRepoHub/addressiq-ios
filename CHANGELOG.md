@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.6.0...v0.7.0) (2026-07-12)
+
+
+### Features
+
+* **widget:** re-vendor iqcollect.js from web v0.5.3 ([#18](https://github.com/PTLRepoHub/addressiq-ios/issues/18)) ([6d3112f](https://github.com/PTLRepoHub/addressiq-ios/commit/6d3112f6b532ce989c9a9d9d8a9d4182cb239703))
+
 ## [0.6.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.5.0...v0.6.0) (2026-07-12)
 
 
