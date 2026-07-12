@@ -19,7 +19,6 @@ public struct AddressIQVerifyView: View {
     let firstName: String?
     let lastName: String?
     let email: String?
-    let googleMapsApiKey: String?
     let theme: AddressIQThemeOverrides?
     let privacyPolicyUrl: URL?
     let termsUrl: URL?
@@ -50,7 +49,6 @@ public struct AddressIQVerifyView: View {
         firstName: String? = nil,
         lastName: String? = nil,
         email: String? = nil,
-        googleMapsApiKey: String? = nil,
         theme: AddressIQThemeOverrides? = nil,
         privacyPolicyUrl: URL? = nil,
         termsUrl: URL? = nil,
@@ -68,7 +66,6 @@ public struct AddressIQVerifyView: View {
         self.firstName = firstName
         self.lastName = lastName
         self.email = email
-        self.googleMapsApiKey = googleMapsApiKey
         self.theme = theme
         self.privacyPolicyUrl = privacyPolicyUrl
         self.termsUrl = termsUrl

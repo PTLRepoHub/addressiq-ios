@@ -176,18 +176,21 @@ xcodegen generate
 xcodebuild -project AddressIQSample.xcodeproj -scheme AddressIQSample \
   -destination 'platform=iOS Simulator,name=iPhone 15' build
 
-# Install + launch, injecting the Maps key as a child env var (never hardcode it)
+# Install + launch (the Maps key is provisioned by the platform via
+# `GET /api/v1/widget/config` — nothing to inject on the client)
 xcrun simctl boot 'iPhone 15' 2>/dev/null || true
 xcrun simctl install booted <path-to>.app
-SIMCTL_CHILD_GOOGLE_MAPS_KEY=<your-maps-key> xcrun simctl launch booted com.addressiq.example
+xcrun simctl launch booted com.addressiq.example
 
 # Grant location + feed a fix (the sim has no real GPS)
 xcrun simctl privacy booted grant location-always com.addressiq.example
 xcrun simctl location booted set 6.5244,3.3792
 ```
 
-The sample reads `GOOGLE_MAPS_KEY` from `ProcessInfo` and the API key from the
-**Login** screen (pre-filled with `aiq_test_demo_bank_seed01`, `.sandbox`). The
+The map key is provisioned by the platform and delivered to the widget via
+`GET /api/v1/widget/config` — integrators do not supply a Maps/Mapbox key. The
+API key comes from the **Login** screen (pre-filled with
+`aiq_test_demo_bank_seed01`, `.sandbox`). The
 generated app's `Info.plist` **must** include
 `NSLocationWhenInUseUsageDescription`,
 `NSLocationAlwaysAndWhenInUseUsageDescription` and `UIBackgroundModes: [location]`

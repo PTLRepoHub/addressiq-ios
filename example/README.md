@@ -36,13 +36,9 @@ open Package.swift        # opens the package in Xcode
 Then pick the **`AddressIQSample`** scheme + a simulator and press **Run**. Xcode
 wraps the iOS executable target into an app bundle for you.
 
-The **map** needs a Google Maps key, injected at runtime (never hardcoded). Add it
-to the scheme's environment variables (Product → Scheme → Edit Scheme → Run →
-Arguments → Environment Variables):
-
-```
-GOOGLE_MAPS_KEY = your-maps-js-api-key
-```
+The **map** key is provisioned automatically by the platform: the SDK fetches it
+from the backend via `GET /api/v1/widget/config` at widget open. Integrators do
+**not** supply a Maps key — there is nothing to set in the scheme.
 
 > **Location permission keys (required).** A bare SwiftPM executable ships without
 > location usage strings, so the OS silently ignores the permission request and the
@@ -52,9 +48,6 @@ GOOGLE_MAPS_KEY = your-maps-js-api-key
 > `NSLocationWhenInUseUsageDescription`, `NSLocationAlwaysAndWhenInUseUsageDescription`,
 > and `NSLocationTemporaryUsageDescriptionDictionary` → `AddressVerification`. The
 > CLI wrapper in §3 already includes them.
-
-> The backend can also supply the Maps key via `/widget/config`; the scheme var is
-> an override/fallback for local runs.
 
 ---
 
@@ -176,7 +169,7 @@ cp dist/iqcollect.js ../addressiq-ios/Sources/AddressIQ/Resources/iqcollect.js
 
 | Symptom | Cause / fix |
 |---|---|
-| **Map: "Oops! Something went wrong… Google Maps"** | Missing/invalid Maps key. Set `GOOGLE_MAPS_KEY` in the scheme env (§2), or configure the platform key on the backend (`/widget/config`). The key needs the **Maps JavaScript API** enabled. |
+| **Map: "Oops! Something went wrong… Google Maps"** | Invalid/missing platform Maps key. The key is provisioned by the backend via `/widget/config` — ensure the platform has a valid Maps key configured (with the **Maps JavaScript API** enabled). Integrators do not set a key on the client. |
 | **Network / verification calls fail** | Backend not reachable. Confirm the API is up on `:4000`; on the simulator use `localhost` (no `10.0.2.2`). For a real device use the LAN IP + ATS exception. |
 | **Widget branding doesn't reflect dashboard changes** | The widget fetches `/widget/config` **on each open** — close and reopen it. Ensure you saved under **Settings → Branding → Widget** (persists to `settings.widget`). |
 | **Focusing an input zooms the page** | Fixed — widget inputs are `font-size: 16px` and the webview sets `maximum-scale=1`. If it recurs, you have a stale `iqcollect.js`; re-embed (§7) and rebuild. |
