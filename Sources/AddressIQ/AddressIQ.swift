@@ -170,9 +170,6 @@ public enum AddressIQDeployment: String {
     /// verify widget is loaded from here (SRI-pinned) with the bundled asset as
     /// the fallback. `.development` never loads remotely.
     public var defaultCdnUrl: URL {
-        // Development-only override (see `devOverride`). Lets a build reach a backend
-        // on another machine — the default is a hardcoded localhost literal.
-        if let o = devOverride("ADDRESSIQ_DEV_CDN_URL"), let url = URL(string: o) { return url }
         switch self {
         case .production:
             return URL(string: BuildConfig.prodCdnURL) ?? URL(string: "https://cdn.addressiqpro.com")!

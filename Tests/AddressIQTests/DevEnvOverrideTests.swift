@@ -53,9 +53,6 @@ final class DevEnvOverrideTests: XCTestCase {
         XCTAssertNil(
             AddressIQDeployment.development.devOverride("ADDRESSIQ_DEV_INGEST_URL", env: env)
         )
-        XCTAssertNil(
-            AddressIQDeployment.development.devOverride("ADDRESSIQ_DEV_CDN_URL", env: env)
-        )
     }
 
     // NOTE: the "throws on a shipped deployment" half of the gate is a
