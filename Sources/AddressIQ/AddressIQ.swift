@@ -129,17 +129,6 @@ public enum AddressIQDeployment: String {
         return value
     }
 
-    /// Development-only Google Maps key (`ADDRESSIQ_DEV_GOOGLE_MAPS_KEY`), or nil.
-    ///
-    /// The key is normally **platform-provisioned**: the widget fetches one from
-    /// `GET /api/v1/widget/config` and falls back to the key baked into the vendored
-    /// bundle. This covers the case that breaks — a local backend with no Maps key
-    /// configured — and so takes precedence over both. It is deliberately NOT a field
-    /// on ``AddressIQConfig``: integrators do not pass a Maps key.
-    public var devGoogleMapsKey: String? {
-        devOverride("ADDRESSIQ_DEV_GOOGLE_MAPS_KEY")
-    }
-
     /// Public API base URL the SDK resolves to for this deployment.
     ///
     /// `production` and `staging` are baked in at publish time from the

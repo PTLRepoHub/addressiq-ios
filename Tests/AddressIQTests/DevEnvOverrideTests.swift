@@ -58,17 +58,6 @@ final class DevEnvOverrideTests: XCTestCase {
         )
     }
 
-    func testMapsKeyOverrideIsHonouredInDevelopment() {
-        // Normally the widget provisions its own key from GET /api/v1/widget/config.
-        // This covers a local backend that has none.
-        XCTAssertEqual(
-            AddressIQDeployment.development.devOverride(
-                "ADDRESSIQ_DEV_GOOGLE_MAPS_KEY", env: ["ADDRESSIQ_DEV_GOOGLE_MAPS_KEY": "AIzaDEV"]
-            ),
-            "AIzaDEV"
-        )
-    }
-
     // NOTE: the "throws on a shipped deployment" half of the gate is a
     // `preconditionFailure`, which traps the process rather than throwing — it is
     // a programmer error, not a recoverable condition, and XCTest cannot catch it
