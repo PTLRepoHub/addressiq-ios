@@ -34,7 +34,7 @@ import AddressIQ
 
 // 1. Initialize once at launch.
 AddressIQ.shared.initialize(
-    config: AddressIQConfig(apiKey: "aiq_live_…", environment: .production)
+    config: AddressIQConfig(apiKey: "aiq_live_…", deployment: .production)
 )
 
 // 2. Identify the user (appUserId is the canonical key).
@@ -60,7 +60,7 @@ background collection automatically once the widget completes.
 AddressIQVerifyView(
     apiKey: "aiq_live_…",
     appUserId: "user_123",
-    environment: .production,
+    deployment: .production,
     onCompleted: { result in
         // result.verificationCode, result.locationCode, result.status
     },
@@ -119,21 +119,36 @@ when foreground or background location is not `GRANTED`. Use
 The collect UI surfaces `AddressIQVerifyError` (`code`, `message`,
 `httpStatus`) via `onFailed`.
 
-## Environment
+## Deployment vs sandbox — two different things
 
-`AddressIQEnvironment` offers `.production`, `.staging`, and `.development`.
+These are orthogonal, and conflating them is the most common integration mistake:
+
+| | What it selects | How you set it |
+|---|---|---|
+| **Deployment** | Which AddressIQ **hosts** you talk to | `AddressIQConfig.deployment` |
+| **Tenant mode** | Whether your data is **sandbox or production** | **Which API key you paste** |
+
+`AddressIQDeployment` offers `.production`, `.staging`, and `.development`.
 Integrators simply choose one; `.development` targets a backend running on your
 host machine (the iOS simulator reaches it via `localhost`).
 
-`.staging` is the canonical name for pre-production
-(`Sources/AddressIQ/AddressIQ.swift:73`), matching the other AddressIQ SDKs.
-**`.sandbox` is deprecated but still accepted**: it is an alias that resolves
-identically (`AddressIQ.swift:83-84`), and the legacy `"sandbox"` raw string
-still decodes to `.staging` (`AddressIQ.swift:93-100`), so config read from a
-plist/JSON keeps working. Prefer `.staging` in new code.
+**`.sandbox` no longer exists**, and `AddressIQDeployment(rawValue: "sandbox")`
+returns `nil`. It was an alias for `.staging`, which asserted that sandbox was a
+deployment — it is not. Sandbox-vs-production is a property of your **API key**:
+`aiq_test_…` resolves to a sandbox tenant server-side, `aiq_live_…` to a
+production one. The SDK never sends a mode and cannot override the key's.
+
+The two combine freely: an `aiq_test_…` key on `.production` is still sandbox
+data; an `aiq_live_…` key on `.staging` is still production-mode data.
+
+> **Migrating from `environment:`?** `environment: .sandbox` → drop the argument
+> and use a sandbox key (`aiq_test_…`), which is almost certainly what you meant.
+> Use `deployment: .staging` only if you specifically wanted the pre-production
+> *hosts*. Anything decoding `"sandbox"` from a plist/JSON now gets `nil` — that
+> is deliberate, and loud.
 
 The base URLs — including the dedicated host used for transit-event batch
-ingestion — are resolved entirely from `environment`; integrators never pass a
+ingestion — are resolved entirely from `deployment`; integrators never pass a
 URL (`resolvedApiUrl` / `resolvedIngestUrl`, `AddressIQ.swift:47-56`). The
 `production` and `staging` hosts are baked in at publish time from six GitHub
 repository variables (see [`docs/RELEASE.md` §3](docs/RELEASE.md)); `development`
@@ -141,7 +156,7 @@ is a compile-time literal (`http://localhost:4000`). Use `.development` to run
 against a local backend; never ship a `.development` build.
 
 `AddressIQConfig.resolvedCdnUrl` (`AddressIQ.swift:64`) exposes the CDN base URL
-for the environment, and the verify webview **does** load the widget from it —
+for the deployment, and the verify webview **does** load the widget from it —
 under an SRI pin. `Sources/AddressIQ/Views/AddressIQWebFlowView.swift:138-199`
 resolves the widget source in this order:
 
@@ -183,8 +198,7 @@ Three details in that markup are load-bearing — each fails *silently* toward
 A SwiftUI sample (iOS 15+) demonstrating the full screen canon. After
 **Login**, the app shows a five-tab interface:
 
-- **Login** — environment picker (development/staging/production; the sample
-  still labels staging "Sandbox", `example/Sources/AddressIQSample/LoginView.swift:24`) + appUserId
+- **Login** — deployment picker (development/staging/production) + appUserId
   field → `initialize(config:)` + `setUser(_:)`.
 - **Verify** — human-labelled hub: a **Collect Address** button that opens the
   `AddressIQVerifyView` collect UI as a sheet, plus **Digital / Physical /

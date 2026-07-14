@@ -5,47 +5,47 @@ import XCTest
 /// exercising a pure (Foundation-only) slice of the public surface.
 /// Runs under `swift test`. The test target is declared in Package.swift.
 final class AddressIQTests: XCTestCase {
-    func testEnvironmentsResolveDistinctApiUrls() {
-        let staging = AddressIQEnvironment.staging.defaultApiUrl
-        let production = AddressIQEnvironment.production.defaultApiUrl
+    func testDeploymentsResolveDistinctApiUrls() {
+        let staging = AddressIQDeployment.staging.defaultApiUrl
+        let production = AddressIQDeployment.production.defaultApiUrl
 
         XCTAssertEqual(staging.scheme, "https")
         XCTAssertEqual(production.scheme, "https")
         XCTAssertNotEqual(staging, production)
     }
 
-    func testConfigResolvesEnvironmentUrl() {
-        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .staging)
-        XCTAssertEqual(config.resolvedApiUrl, AddressIQEnvironment.staging.defaultApiUrl)
+    func testConfigResolvesDeploymentUrl() {
+        let config = AddressIQConfig(apiKey: "aiq_test_key", deployment: .staging)
+        XCTAssertEqual(config.resolvedApiUrl, AddressIQDeployment.staging.defaultApiUrl)
     }
 
-    func testDevelopmentEnvironmentResolvesLocalhost() {
-        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .development)
+    func testDevelopmentDeploymentResolvesLocalhost() {
+        let config = AddressIQConfig(apiKey: "aiq_test_key", deployment: .development)
         XCTAssertEqual(config.resolvedApiUrl, URL(string: "http://localhost:4000")!)
     }
 
     func testIngestUrlIsDistinctFromApiUrl() {
-        let production = AddressIQConfig(apiKey: "aiq_test_key", environment: .production)
+        let production = AddressIQConfig(apiKey: "aiq_test_key", deployment: .production)
         XCTAssertEqual(production.resolvedIngestUrl.scheme, "https")
         XCTAssertNotEqual(production.resolvedIngestUrl, production.resolvedApiUrl)
 
-        let staging = AddressIQConfig(apiKey: "aiq_test_key", environment: .staging)
+        let staging = AddressIQConfig(apiKey: "aiq_test_key", deployment: .staging)
         XCTAssertNotEqual(staging.resolvedIngestUrl, staging.resolvedApiUrl)
     }
 
     func testDevelopmentIngestResolvesLocalhost() {
-        let config = AddressIQConfig(apiKey: "aiq_test_key", environment: .development)
+        let config = AddressIQConfig(apiKey: "aiq_test_key", deployment: .development)
         XCTAssertEqual(config.resolvedIngestUrl, URL(string: "http://localhost:4000")!)
     }
 
-    // MARK: - Per-environment CDN (baked from PROD_/STAGING_ADDRESSIQ_CDN_BASE_URL)
+    // MARK: - Per-deployment CDN (baked from PROD_/STAGING_ADDRESSIQ_CDN_BASE_URL)
 
     /// The CDN host is a resolved config value only — the widget ships bundled
     /// and never loads from here (see AddressIQVerifyView). This just pins that
-    /// each environment resolves its own host rather than sharing one.
-    func testCdnUrlResolvesPerEnvironment() {
-        let staging = AddressIQConfig(apiKey: "aiq_test_key", environment: .staging)
-        let production = AddressIQConfig(apiKey: "aiq_test_key", environment: .production)
+    /// each deployment resolves its own host rather than sharing one.
+    func testCdnUrlResolvesPerDeployment() {
+        let staging = AddressIQConfig(apiKey: "aiq_test_key", deployment: .staging)
+        let production = AddressIQConfig(apiKey: "aiq_test_key", deployment: .production)
 
         XCTAssertEqual(staging.resolvedCdnUrl.scheme, "https")
         XCTAssertEqual(production.resolvedCdnUrl.scheme, "https")
@@ -53,16 +53,20 @@ final class AddressIQTests: XCTestCase {
         XCTAssertNotEqual(production.resolvedCdnUrl, production.resolvedApiUrl)
     }
 
-    // MARK: - `sandbox` → `staging` rename back-compat
+    // MARK: - `sandbox` is a tenant mode, not a deployment
 
-    /// The rename must not break integrators who reconstruct the environment
-    /// from a string (decoded config, plist, JS bridge). Before the custom
-    /// `init?(rawValue:)`, `"sandbox"` returned nil after the rename.
-    func testLegacySandboxRawValueStillResolvesToStaging() {
-        XCTAssertEqual(AddressIQEnvironment(rawValue: "sandbox"), .staging)
-        XCTAssertEqual(AddressIQEnvironment(rawValue: "staging"), .staging)
-        XCTAssertEqual(AddressIQEnvironment(rawValue: "production"), .production)
-        XCTAssertEqual(AddressIQEnvironment(rawValue: "development"), .development)
-        XCTAssertNil(AddressIQEnvironment(rawValue: "nonsense"))
+    /// `"sandbox"` used to resolve to `.staging` via a custom `init?(rawValue:)`,
+    /// which asserted that sandbox was a deployment. It is not — sandbox-vs-production
+    /// is decided by the API key, server-side. The custom initialiser existed solely
+    /// for that alias and is gone; the synthesised one correctly returns nil.
+    func testSandboxRawValueIsRejected() {
+        XCTAssertNil(AddressIQDeployment(rawValue: "sandbox"))
+    }
+
+    func testDeploymentRawValuesResolve() {
+        XCTAssertEqual(AddressIQDeployment(rawValue: "staging"), .staging)
+        XCTAssertEqual(AddressIQDeployment(rawValue: "production"), .production)
+        XCTAssertEqual(AddressIQDeployment(rawValue: "development"), .development)
+        XCTAssertNil(AddressIQDeployment(rawValue: "nonsense"))
     }
 }

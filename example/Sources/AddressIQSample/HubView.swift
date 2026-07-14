@@ -65,7 +65,7 @@ struct HubView: View {
             AddressIQVerifyView(
                 apiKey: model.apiKey,
                 appUserId: model.appUserId,
-                environment: model.environment,
+                deployment: model.deployment,
                 // Fallback name if the backend doesn't supply one; the widget
                 // fetches the real business identity from the backend.
                 businessName: model.businessName.isEmpty ? nil : model.businessName,

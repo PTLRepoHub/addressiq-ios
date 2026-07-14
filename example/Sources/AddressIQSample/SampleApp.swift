@@ -22,7 +22,7 @@ struct AddressIQSampleApp: App {
     }
 }
 
-/// Shared app state. Holds the chosen environment + appUserId, the
+/// Shared app state. Holds the chosen deployment + appUserId, the
 /// in-memory list of collected location codes, and a derived lifecycle
 /// label. The SDK itself is the source of truth (`AddressIQ.shared`); this
 /// model just mirrors what the UI needs.
@@ -30,7 +30,7 @@ struct AddressIQSampleApp: App {
 final class AppModel: ObservableObject {
     // Login inputs.
     @Published var apiKey: String = "aiq_test_demo_bank_seed01"
-    @Published var environment: AddressIQEnvironment = .staging
+    @Published var deployment: AddressIQDeployment = .staging
     @Published var appUserId: String = "cust_sample_001"
 
     // Demo / local-dev options.
@@ -54,7 +54,7 @@ final class AppModel: ObservableObject {
 
     func login() async {
         AddressIQ.shared.initialize(
-            config: AddressIQConfig(apiKey: apiKey, environment: environment)
+            config: AddressIQConfig(apiKey: apiKey, deployment: deployment)
         )
         do {
             try await AddressIQ.shared.setUser(SDKUser(appUserId: appUserId))

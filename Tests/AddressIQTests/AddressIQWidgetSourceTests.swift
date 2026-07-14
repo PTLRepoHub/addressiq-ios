@@ -19,7 +19,7 @@ final class AddressIQWidgetSourceTests: XCTestCase {
 
     private func tag(
         widgetURL: URL? = nil,
-        environment: AddressIQEnvironment = .production,
+        deployment: AddressIQDeployment = .production,
         cdnBaseURL: URL? = AddressIQWidgetSourceTests.cdn,
         version: String = "0.4.0",
         integrity: String = "sha384-abc123",
@@ -27,7 +27,7 @@ final class AddressIQWidgetSourceTests: XCTestCase {
     ) -> String? {
         AddressIQWebFlowView.widgetScriptTag(
             widgetURL: widgetURL,
-            environment: environment,
+            deployment: deployment,
             cdnBaseURL: cdnBaseURL,
             widgetVersion: version,
             widgetIntegrity: integrity,
@@ -65,8 +65,8 @@ final class AddressIQWidgetSourceTests: XCTestCase {
     }
 
     /// `.development` points at a local backend; never reach for a remote host.
-    func testDevelopmentEnvironmentInlinesBundleAndNeverLoadsRemotely() throws {
-        let html = try XCTUnwrap(tag(environment: .development))
+    func testDevelopmentDeploymentInlinesBundleAndNeverLoadsRemotely() throws {
+        let html = try XCTUnwrap(tag(deployment: .development))
         XCTAssertEqual(html, "<script>\(bundle)</script>")
         XCTAssertFalse(html.contains("src="))
         XCTAssertFalse(html.contains("integrity="))
@@ -93,7 +93,7 @@ final class AddressIQWidgetSourceTests: XCTestCase {
     /// Silently rendering an empty webview would be worse than a typed error.
     func testNoBundleAndNoPinFailsClosed() {
         XCTAssertNil(tag(version: "", integrity: "", bundledJS: nil))
-        XCTAssertNil(tag(environment: .development, bundledJS: nil))
+        XCTAssertNil(tag(deployment: .development, bundledJS: nil))
     }
 
     /// A missing bundle is still fine on the CDN path — the pin makes the remote

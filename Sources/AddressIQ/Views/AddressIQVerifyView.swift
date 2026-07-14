@@ -14,7 +14,7 @@ import Foundation
 public struct AddressIQVerifyView: View {
     let apiKey: String
     let appUserId: String
-    let environment: AddressIQEnvironment
+    let deployment: AddressIQDeployment
     let phone: String?
     let firstName: String?
     let lastName: String?
@@ -30,7 +30,7 @@ public struct AddressIQVerifyView: View {
 
     // How the widget is loaded: CDN-first, SRI-pinned, bundled fallback.
     //
-    // The widget is fetched from the per-environment CDN at the immutable path
+    // The widget is fetched from the per-deployment CDN at the immutable path
     // `{cdn}/v{x.y.z}/iqcollect.js`, with a Subresource Integrity `integrity`
     // pin on the <script> tag. Both the version and the hash are baked into
     // BuildConfig at publish time from `.widget-version` / `.widget-integrity`,
@@ -48,7 +48,7 @@ public struct AddressIQVerifyView: View {
     // stranded on a blank sheet.
     //
     // If no pin has been published yet (empty version/integrity) or the
-    // environment is `.development`, the bundle is inlined directly — the
+    // deployment is `.development`, the bundle is inlined directly — the
     // pre-CDN behaviour, unchanged. If neither source is available the SDK
     // still fails closed, surfacing WIDGET_BUNDLE_MISSING via `onFailed`; it
     // will not load an unpinned remote script.
@@ -61,7 +61,7 @@ public struct AddressIQVerifyView: View {
     public init(
         apiKey: String,
         appUserId: String,
-        environment: AddressIQEnvironment = .production,
+        deployment: AddressIQDeployment = .production,
         phone: String? = nil,
         firstName: String? = nil,
         lastName: String? = nil,
@@ -77,7 +77,7 @@ public struct AddressIQVerifyView: View {
     ) {
         self.apiKey = apiKey
         self.appUserId = appUserId
-        self.environment = environment
+        self.deployment = deployment
         self.phone = phone
         self.firstName = firstName
         self.lastName = lastName
@@ -99,10 +99,10 @@ public struct AddressIQVerifyView: View {
         AddressIQWebFlowView(
             apiKey: apiKey,
             appUserId: appUserId,
-            apiURL: environment.defaultApiUrl,
+            apiURL: deployment.defaultApiUrl,
             widgetURL: widgetURL,
-            environment: environment,
-            cdnBaseURL: environment.defaultCdnUrl,
+            deployment: deployment,
+            cdnBaseURL: deployment.defaultCdnUrl,
             businessName: businessName,
             primaryColorHex: nil,
             onCompleted: onCompleted,

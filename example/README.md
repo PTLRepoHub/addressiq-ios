@@ -112,7 +112,7 @@ On launch you land on **AddressIQ Sample** with:
 
 - **API key** and **App user ID** — your test credentials (defaults:
   `aiq_test_demo_bank_seed01` / `cust_sample_001`).
-- **Environment** — Development (local backend on `http://localhost:4000`),
+- **Deployment** — Development (local backend on `http://localhost:4000`),
   Staging, or Production (the hosted APIs). See §5 for local runs.
 - **Business name** — a **fallback only**; branding (name, logo, colours, button
   style, corner radius) normally comes from the backend via `/widget/config`,
@@ -125,7 +125,7 @@ opens the Hub.
 
 ## 5. Run against the local backend
 
-Select the **Development** environment on the login screen. The SDK resolves it
+Select the **Development** deployment on the login screen. The SDK resolves it
 to the compiled-in `http://localhost:4000`, so start a backend on that port:
 
 - **The sample Node server** (`addressiq-node-backend`) on `:4000`:
@@ -138,7 +138,7 @@ to the compiled-in `http://localhost:4000`, so start a backend on that port:
 
 > On the **simulator**, `localhost` reaches your Mac, so this works as-is. On a
 > **real device**, `localhost` will not reach your Mac; expose the backend on
-> your Mac's LAN IP. Because the environment URL is compiled in, a device run
+> your Mac's LAN IP. Because the deployment URL is compiled in, a device run
 > against a non-localhost host is out of scope for this sample.
 
 ---

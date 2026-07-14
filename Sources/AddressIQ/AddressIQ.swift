@@ -30,43 +30,61 @@ public enum AddressIQLifecycleState: String {
 }
 
 public struct AddressIQConfig {
+    /// Tenant API key. This — not ``deployment`` — decides whether the tenant is
+    /// in sandbox or production mode: `aiq_test_…` resolves to a sandbox App row
+    /// server-side, `aiq_live_…` to a production one. The SDK never sends a mode.
     public let apiKey: String
-    public let environment: AddressIQEnvironment
+
+    /// Which AddressIQ deployment (i.e. which hosts) to talk to. Orthogonal to
+    /// sandbox-vs-production, which lives in ``apiKey``.
+    public let deployment: AddressIQDeployment
 
     public init(
         apiKey: String,
-        environment: AddressIQEnvironment = .production
+        deployment: AddressIQDeployment = .production
     ) {
         self.apiKey = apiKey
-        self.environment = environment
+        self.deployment = deployment
     }
 
-    /// Effective API URL, resolved entirely from `environment`. The SDK
-    /// never accepts a caller-supplied URL — production and sandbox point
-    /// at the hosted backends, `.development` at the local dev backend.
+    /// Effective API URL, resolved entirely from `deployment`. The SDK never
+    /// accepts a caller-supplied URL — `.production` and `.staging` point at the
+    /// hosted backends, `.development` at the local dev backend.
     public var resolvedApiUrl: URL {
-        return environment.defaultApiUrl
+        return deployment.defaultApiUrl
     }
 
     /// Effective ingest URL for transit-event batches, resolved entirely from
-    /// `environment`. Ingestion is served by a dedicated host, distinct from
+    /// `deployment`. Ingestion is served by a dedicated host, distinct from
     /// the main API host.
     public var resolvedIngestUrl: URL {
-        return environment.defaultIngestUrl
+        return deployment.defaultIngestUrl
     }
 
-    /// Effective CDN base URL for this environment.
+    /// Effective CDN base URL for this deployment.
     ///
     /// The verify widget is loaded from here at the immutable, SRI-pinned path
     /// `{cdn}/v{BuildConfig.widgetVersion}/iqcollect.js`, falling back to the
     /// bundled `Resources/iqcollect.js` on any failure. See AddressIQVerifyView
     /// for the full model.
     public var resolvedCdnUrl: URL {
-        return environment.defaultCdnUrl
+        return deployment.defaultCdnUrl
     }
 }
 
-public enum AddressIQEnvironment: String {
+/// Which AddressIQ DEPLOYMENT the SDK talks to — i.e. which hosts.
+///
+/// This is NOT the tenant's mode. Sandbox-vs-production is a property of the API
+/// KEY (`aiq_test_…` resolves to a sandbox tenant server-side, `aiq_live_…` to a
+/// production one) and is decided entirely by the backend on every request — the
+/// SDK neither sends it nor can influence it. The two axes are orthogonal: a test
+/// key against the `.production` deployment is still sandbox.
+///
+/// `sandbox` was previously accepted here as an alias for ``staging`` — both as a
+/// source-level `static let` and as a `"sandbox"` raw value — which asserted that
+/// sandbox was a deployment. It is not, and both are now removed:
+/// `AddressIQDeployment(rawValue: "sandbox")` returns `nil`.
+public enum AddressIQDeployment: String {
     /// Pre-production. Named `staging` across all AddressIQ SDKs and matching
     /// the `STAGING_*` build variables.
     case staging
@@ -77,28 +95,11 @@ public enum AddressIQEnvironment: String {
     /// concern. Never ship a build configured for `.development`.
     case development
 
-    /// Former name for ``staging``. Retained so existing integrators keep
-    /// compiling; resolves identically.
-    @available(*, deprecated, renamed: "staging")
-    public static let sandbox = AddressIQEnvironment.staging
+    // NOTE: no custom `init?(rawValue:)`. The previous one existed solely to map
+    // the legacy `"sandbox"` string onto `.staging`; with the alias gone, the
+    // synthesised initialiser is correct and returns nil for an unknown value.
 
-    /// Accepts the legacy `"sandbox"` raw value as an alias for ``staging``.
-    ///
-    /// The static `sandbox` alias above only covers source-level `.sandbox`.
-    /// This enum has a `String` raw value, so anything that reconstructs an
-    /// environment from a string — a decoded config, a host app reading its
-    /// own plist, a bridge from JS — would otherwise get `nil` back after the
-    /// rename and silently fall through to a default. Map the old spelling.
-    public init?(rawValue: String) {
-        switch rawValue {
-        case "staging", "sandbox": self = .staging
-        case "production": self = .production
-        case "development": self = .development
-        default: return nil
-        }
-    }
-
-    /// Public API base URL the SDK resolves to for this environment.
+    /// Public API base URL the SDK resolves to for this deployment.
     ///
     /// `production` and `staging` are baked in at publish time from the
     /// `PROD_ADDRESSIQ_API_BASE_URL` / `STAGING_ADDRESSIQ_API_BASE_URL` GitHub variables; each
@@ -114,7 +115,7 @@ public enum AddressIQEnvironment: String {
         }
     }
 
-    /// Ingest base URL the SDK resolves to for this environment. Transit-event
+    /// Ingest base URL the SDK resolves to for this deployment. Transit-event
     /// batches post here rather than to `defaultApiUrl`. Baked from
     /// `PROD_ADDRESSIQ_INGEST_BASE_URL` / `STAGING_ADDRESSIQ_INGEST_BASE_URL`.
     public var defaultIngestUrl: URL {
@@ -128,7 +129,7 @@ public enum AddressIQEnvironment: String {
         }
     }
 
-    /// CDN base URL for this environment. Baked from `PROD_ADDRESSIQ_CDN_BASE_URL` /
+    /// CDN base URL for this deployment. Baked from `PROD_ADDRESSIQ_CDN_BASE_URL` /
     /// `STAGING_ADDRESSIQ_CDN_BASE_URL`. See ``AddressIQConfig/resolvedCdnUrl`` — the
     /// verify widget is loaded from here (SRI-pinned) with the bundled asset as
     /// the fallback. `.development` never loads remotely.

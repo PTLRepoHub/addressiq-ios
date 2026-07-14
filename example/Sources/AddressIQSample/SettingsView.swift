@@ -10,7 +10,7 @@ struct SettingsView: View {
         Form {
             Section("Session") {
                 LabeledRow("App user", model.appUserId)
-                LabeledRow("Environment", model.environment.rawValue)
+                LabeledRow("Deployment", model.deployment.rawValue)
                 LabeledRow("Lifecycle", model.lifecycle)
             }
 

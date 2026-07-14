@@ -33,7 +33,7 @@ public final class AddressIQVerifyViewController: UIViewController {
     public init(
         apiKey: String,
         appUserId: String,
-        environment: AddressIQEnvironment = .production,
+        deployment: AddressIQDeployment = .production,
         phone: String? = nil,
         firstName: String? = nil,
         lastName: String? = nil,
@@ -46,7 +46,7 @@ public final class AddressIQVerifyViewController: UIViewController {
         let view = AddressIQVerifyView(
             apiKey: apiKey,
             appUserId: appUserId,
-            environment: environment,
+            deployment: deployment,
             phone: phone,
             firstName: firstName,
             lastName: lastName,

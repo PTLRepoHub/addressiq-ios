@@ -1,4 +1,4 @@
-// Login screen (§6 canon): environment picker + appUserId field →
+// Login screen (§6 canon): deployment picker + appUserId field →
 // `initialize` + `setUser`.
 import SwiftUI
 import AddressIQ
@@ -18,11 +18,11 @@ struct LoginView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
-                Section("Environment") {
-                    Picker("Environment", selection: $model.environment) {
-                        Text("Development").tag(AddressIQEnvironment.development)
-                        Text("Staging").tag(AddressIQEnvironment.staging)
-                        Text("Production").tag(AddressIQEnvironment.production)
+                Section("Deployment") {
+                    Picker("Deployment", selection: $model.deployment) {
+                        Text("Development").tag(AddressIQDeployment.development)
+                        Text("Staging").tag(AddressIQDeployment.staging)
+                        Text("Production").tag(AddressIQDeployment.production)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -31,7 +31,7 @@ struct LoginView: View {
                 } header: {
                     Text("Local development")
                 } footer: {
-                    Text("Select the Development environment to run against a local backend on http://localhost:4000 (the simulator reaches the host via localhost).")
+                    Text("Select the Development deployment to run against a local backend on http://localhost:4000 (the simulator reaches the host via localhost).")
                 }
                 Section {
                     Button {

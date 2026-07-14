@@ -107,7 +107,7 @@ final class AddressIQWebBridgeTests: XCTestCase {
         // (The earlier `XCTestExpectation fulfill` assertion was the same bug — a
         // late request landing after the wait had already expired.)
         //
-        // Rejecting every request makes the flow deterministic in any environment:
+        // Rejecting every request makes the flow deterministic in any deployment:
         // no saved addresses → collect flow → map step → auto-locate → getLocation.
         // Reference data (countries/states) also fails here, which is fine: the
         // form degrades to free text by design (collect-form.ts:299-303).
@@ -128,7 +128,7 @@ final class AddressIQWebBridgeTests: XCTestCase {
           //
           // It used to point `apiUrl` at a closed port and assume the connection
           // would fail fast — but the widget resolves its host from the BAKED
-          // environment and ignores `apiUrl`, so the test was really hitting
+          // deployment and ignores `apiUrl`, so the test was really hitting
           // PRODUCTION from CI. It passed only because prod happened to answer in
           // time; when it didn't, the flow stalled and the wait expired.
           //
@@ -191,7 +191,7 @@ final class AddressIQWebBridgeTests: XCTestCase {
         // never executed at all, so the widget does not mount, no fetch is issued
         // and nothing renders — the diagnostic dump comes back as
         //   {"mounted":false,"errors":[],"bridgeCalls":[],"buttons":[],"bodyText":""}
-        // That is an environment failure, not a product one, and gating CI on it
+        // That is an deployment failure, not a product one, and gating CI on it
         // made this test flap green/red on runner scheduling alone.
         //
         // If the widget DID mount and the round-trip still failed, that is a real

@@ -23,9 +23,9 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     /// Explicit developer override. Takes precedence over BOTH the CDN and the
     /// bundled widget. `nil` means "resolve normally" — see `widgetScriptTag`.
     let widgetURL: URL?
-    /// Which environment we resolved from. `.development` never loads remotely.
-    let environment: AddressIQEnvironment
-    /// CDN base for this environment (no trailing slash). The immutable widget
+    /// Which deployment we resolved from. `.development` never loads remotely.
+    let deployment: AddressIQDeployment
+    /// CDN base for this deployment (no trailing slash). The immutable widget
     /// lives at `{cdnBaseURL}/v{version}/iqcollect.js`.
     let cdnBaseURL: URL?
     let businessName: String?
@@ -91,7 +91,7 @@ struct AddressIQWebFlowView: UIViewRepresentable {
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         guard let widgetScript = Self.widgetScriptTag(
             widgetURL: widgetURL,
-            environment: environment,
+            deployment: deployment,
             cdnBaseURL: cdnBaseURL,
             widgetVersion: BuildConfig.widgetVersion,
             widgetIntegrity: BuildConfig.widgetIntegrity,
@@ -119,7 +119,7 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     ///
     /// Resolution order (see the model note in AddressIQVerifyView):
     ///   1. `widgetURL` — explicit developer override, wins over everything.
-    ///   2. CDN, if every precondition holds: a shippable environment, a CDN
+    ///   2. CDN, if every precondition holds: a shippable deployment, a CDN
     ///      base, and BOTH a baked `widgetVersion` and `widgetIntegrity`. The
     ///      tag carries an SRI `integrity` pin, which WebKit enforces: a
     ///      tampered or mismatched bundle refuses to execute and fires
@@ -137,7 +137,7 @@ struct AddressIQWebFlowView: UIViewRepresentable {
     /// CDN bundle or the fallback has already defined `window.AddressIQ`.
     static func widgetScriptTag(
         widgetURL: URL?,
-        environment: AddressIQEnvironment,
+        deployment: AddressIQDeployment,
         cdnBaseURL: URL?,
         widgetVersion: String,
         widgetIntegrity: String,
@@ -176,7 +176,7 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         let cdnBase = cdnBaseURL?.absoluteString.hasSuffix("/") == true
             ? String(cdnBaseURL!.absoluteString.dropLast())
             : cdnBaseURL?.absoluteString
-        let cdnUsable = environment != .development
+        let cdnUsable = deployment != .development
             && !(cdnBase ?? "").isEmpty
             && !widgetVersion.isEmpty
             && !widgetIntegrity.isEmpty
