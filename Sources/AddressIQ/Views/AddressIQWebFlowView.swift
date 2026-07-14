@@ -83,6 +83,18 @@ struct AddressIQWebFlowView: UIViewRepresentable {
             // Drives the platform-specific "Location permission" Settings screen.
             "platform": "ios",
         ]
+        // Development-only Maps key (ADDRESSIQ_DEV_GOOGLE_MAPS_KEY). Normally the
+        // widget provisions its own key — it fetches one from GET /api/v1/widget/config
+        // and falls back to the key baked into the vendored bundle — so this is absent
+        // in every shipped build. It covers the case that breaks: a local backend with
+        // no Maps key configured. `devGoogleMapsKey` traps outside .development.
+        //
+        // NOTE: inert until addressiq-web's `googleMapsApiKey` field ships and that
+        // build is re-vendored here by the fanout; the widget currently reads only the
+        // remote value or its own baked literal.
+        if let devMapsKey = deployment.devGoogleMapsKey {
+            cfg["googleMapsApiKey"] = devMapsKey
+        }
         var business: [String: Any] = [:]
         if let businessName { business["displayName"] = businessName }
         if let primaryColorHex { business["primaryColor"] = primaryColorHex }

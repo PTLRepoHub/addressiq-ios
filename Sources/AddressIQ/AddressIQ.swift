@@ -99,12 +99,56 @@ public enum AddressIQDeployment: String {
     // the legacy `"sandbox"` string onto `.staging`; with the alias gone, the
     // synthesised initialiser is correct and returns nil for an unknown value.
 
+    /// A development-only override read from the process environment, or nil.
+    ///
+    /// Set them as **Environment Variables on your Xcode scheme** (Product → Scheme
+    /// → Edit Scheme → Run → Arguments), or export them before `swift test`. They
+    /// exist because the `development` hosts are otherwise hardcoded to
+    /// `localhost:4000`, with no way to reach a backend on another machine.
+    ///
+    /// Scheme variables belong to the scheme, not the binary, so they cannot leak
+    /// into a released build — but the gate below does not rely on that: an
+    /// override supplied on any deployment other than `.development` is a **fatal
+    /// misconfiguration**, not a value to be quietly ignored. A build-time variable
+    /// must never be able to point a shipped app at an arbitrary host.
+    ///
+    /// `env` is a parameter only so tests can drive both sides of the switch.
+    func devOverride(
+        _ name: String,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        guard let value = env[name], !value.isEmpty else { return nil }
+        guard self == .development else {
+            preconditionFailure(
+                "AddressIQ: \(name) is a development-only override, but deployment is "
+                    + "\"\(rawValue)\". Outside development the SDK resolves its hosts from the "
+                    + "values baked at release — it will not let an environment variable point a "
+                    + "shipped app at an arbitrary host. Unset \(name), or use .development."
+            )
+        }
+        return value
+    }
+
+    /// Development-only Google Maps key (`ADDRESSIQ_DEV_GOOGLE_MAPS_KEY`), or nil.
+    ///
+    /// The key is normally **platform-provisioned**: the widget fetches one from
+    /// `GET /api/v1/widget/config` and falls back to the key baked into the vendored
+    /// bundle. This covers the case that breaks — a local backend with no Maps key
+    /// configured — and so takes precedence over both. It is deliberately NOT a field
+    /// on ``AddressIQConfig``: integrators do not pass a Maps key.
+    public var devGoogleMapsKey: String? {
+        devOverride("ADDRESSIQ_DEV_GOOGLE_MAPS_KEY")
+    }
+
     /// Public API base URL the SDK resolves to for this deployment.
     ///
     /// `production` and `staging` are baked in at publish time from the
     /// `PROD_ADDRESSIQ_API_BASE_URL` / `STAGING_ADDRESSIQ_API_BASE_URL` GitHub variables; each
     /// falls back to its checked-in literal if the baked value fails to parse.
     public var defaultApiUrl: URL {
+        // Development-only override (see `devOverride`). Lets a build reach a backend
+        // on another machine — the default is a hardcoded localhost literal.
+        if let o = devOverride("ADDRESSIQ_DEV_API_URL"), let url = URL(string: o) { return url }
         switch self {
         case .production:
             return URL(string: BuildConfig.prodApiURL) ?? URL(string: "https://api.addressiqpro.com")!
@@ -119,6 +163,9 @@ public enum AddressIQDeployment: String {
     /// batches post here rather than to `defaultApiUrl`. Baked from
     /// `PROD_ADDRESSIQ_INGEST_BASE_URL` / `STAGING_ADDRESSIQ_INGEST_BASE_URL`.
     public var defaultIngestUrl: URL {
+        // Development-only override (see `devOverride`). Lets a build reach a backend
+        // on another machine — the default is a hardcoded localhost literal.
+        if let o = devOverride("ADDRESSIQ_DEV_INGEST_URL"), let url = URL(string: o) { return url }
         switch self {
         case .production:
             return URL(string: BuildConfig.prodIngestURL) ?? URL(string: "https://ingest-api.addressiqpro.com")!
@@ -134,6 +181,9 @@ public enum AddressIQDeployment: String {
     /// verify widget is loaded from here (SRI-pinned) with the bundled asset as
     /// the fallback. `.development` never loads remotely.
     public var defaultCdnUrl: URL {
+        // Development-only override (see `devOverride`). Lets a build reach a backend
+        // on another machine — the default is a hardcoded localhost literal.
+        if let o = devOverride("ADDRESSIQ_DEV_CDN_URL"), let url = URL(string: o) { return url }
         switch self {
         case .production:
             return URL(string: BuildConfig.prodCdnURL) ?? URL(string: "https://cdn.addressiqpro.com")!
