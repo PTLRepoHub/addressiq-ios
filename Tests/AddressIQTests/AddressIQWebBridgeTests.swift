@@ -5,24 +5,27 @@ import WebKit
 
 /// Integration test for the shared-widget WKWebView bridge.
 ///
-/// Loads the REAL bundled widget (`Resources/iqcollect.js`) into a `WKWebView`,
-/// drives the flow to the point it needs a location, and asserts the full
-/// `HostBridge` round-trip works against a live WebKit engine:
-///   1. the bundled widget parses and mounts (`window.AddressIQ.IQCollect`),
+/// Loads the widget into a `WKWebView`, drives the flow to the point it needs a
+/// location, and asserts the full `HostBridge` round-trip works against a live
+/// WebKit engine:
+///   1. the widget parses and mounts (`window.AddressIQ.IQCollect`),
 ///   2. the widget's `BridgeLocationProvider` posts a `getLocation` request to
 ///      the native `WKScriptMessageHandler` (JS → native),
 ///   3. a native `window.AddressIQBridge.resolve(...)` reply is accepted by the
 ///      widget without error (native → JS).
+///
+/// The SDK no longer SHIPS a widget bundle (it loads the SRI-pinned copy from the
+/// CDN at runtime), so this reads a TEST FIXTURE — a checked-in copy under
+/// `Tests/AddressIQTests/Fixtures/`. The test exercises the native bridge against
+/// real widget JS; that requirement is unchanged by where production sources the
+/// widget, and a fixture keeps the test off the network.
 final class AddressIQWebBridgeTests: XCTestCase {
 
-    /// Reads the widget bundle straight from the package Resources dir so the
-    /// test exercises the exact JS shipped to partners.
+    /// Reads the widget from the test fixture (not a shipped resource).
     private func bundledWidgetJS() throws -> String {
-        // Read the exact bundle shipped to partners from the source tree
-        // (Tests/AddressIQTests/<file> → ../../Sources/AddressIQ/Resources).
         let src = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/AddressIQ/Resources/iqcollect.js")
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/iqcollect.js")
         return try String(contentsOf: src, encoding: .utf8)
     }
 

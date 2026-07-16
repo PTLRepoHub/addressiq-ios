@@ -34,7 +34,7 @@ enum BuildConfig {
     static let prodCdnURL = "https://cdn.addressiqpro.com"
 
     /// Bare semver of the published web widget, e.g. "0.4.0". Empty ⇒ no CDN pin.
-    static let widgetVersion = ""
+    static let widgetVersion = "0.5.3"
     /// Subresource-integrity hash of that widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
-    static let widgetIntegrity = ""
+    static let widgetIntegrity = "sha384-wUErWmll1WWgesjXvSN93KLxHTDLNXdZ4FMR9nT2tQ7tpdBdEuQCDMkHgdssRvkb"
 }

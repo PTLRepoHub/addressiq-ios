@@ -27,11 +27,11 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ],
-            path: "Sources/AddressIQ",
-            resources: [
-                // Shared collect/verify web widget, loaded into the WKWebView host.
-                .copy("Resources/iqcollect.js"),
-            ]
+            path: "Sources/AddressIQ"
+            // No bundled resources: the collect/verify widget is loaded from the
+            // SRI-pinned CDN, not shipped. (Removing `resources:` also un-synthesises
+            // Bundle.module, which is why the resourceBundle()/bundledWidgetJS()
+            // accessors were deleted in the same change.)
         ),
         .testTarget(
             name: "AddressIQTests",

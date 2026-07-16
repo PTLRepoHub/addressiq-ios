@@ -41,22 +41,21 @@ public struct AddressIQVerifyView: View {
     // the CDN publishes immutable /v{x.y.z}/ paths — a mutable "latest" URL
     // could not carry a build-time hash.
     //
-    // The bundled widget (SPM resource / pod resource bundle,
-    // Resources/iqcollect.js) is still embedded in the page and is injected by
-    // `__iqWidgetFallback()` if the remote script fails for ANY reason — CDN
-    // outage, offline device, or a failed integrity check. Users are never
-    // stranded on a blank sheet.
+    // There is NO bundled fallback — the SDK ships no copy of the widget. If the
+    // remote script fails for any reason (CDN outage, offline device, a failed
+    // integrity check), `__iqWidgetLoadFailed()` reports WIDGET_LOAD_FAILED via
+    // `onFailed` rather than leaving a blank sheet. Verification depends on the
+    // CDN being reachable.
     //
-    // If no pin has been published yet (empty version/integrity) or the
-    // deployment is `.development`, the bundle is inlined directly — the
-    // pre-CDN behaviour, unchanged. If neither source is available the SDK
-    // still fails closed, surfacing WIDGET_BUNDLE_MISSING via `onFailed`; it
-    // will not load an unpinned remote script.
+    // `.development` is no longer special-cased: it loads the same pinned bundle
+    // as everything else. If no pin has been published (empty version/integrity)
+    // and there is no override, the SDK fails closed with WIDGET_PIN_MISSING — a
+    // packaging bug, distinct from the runtime WIDGET_LOAD_FAILED — and will not
+    // load an unpinned remote script.
     //
-    // `widgetURL` remains supported as an explicit developer override, taking
-    // precedence over both, for serving a local bundle during development (see
-    // docs — run the demo proxy with `MOCK_UPSTREAM=1` and serve
-    // `dist/iqcollect.js`).
+    // `widgetURL` is a development-only override, taking precedence over the CDN,
+    // for serving a widget you are actively changing (unpinned; a rebuilt widget
+    // cannot satisfy a fixed hash).
 
     public init(
         apiKey: String,

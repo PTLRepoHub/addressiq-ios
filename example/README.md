@@ -72,7 +72,7 @@ PROD="$DD/Build/Products/Debug-iphonesimulator"
 APP=/tmp/AddressIQSample.app
 rm -rf "$APP"; mkdir -p "$APP"
 cp "$PROD/AddressIQSample" "$APP/"
-cp -R "$PROD/AddressIQ_AddressIQ.bundle" "$APP/"          # widget assets (iqcollect.js) live here
+# (AddressIQ ships no resource bundle — the widget loads from the CDN at runtime.)
 cp -R "$PROD/SwiftProtobuf_SwiftProtobuf.bundle" "$APP/" 2>/dev/null || true
 cat > "$APP/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -155,13 +155,15 @@ to the compiled-in `http://localhost:4000`, so start a backend on that port:
 
 ## 7. Working on the web widget
 
-The widget UI is the shared **web** widget, shipped as
-`Sources/AddressIQ/Resources/iqcollect.js` (loaded via `Bundle.module`). After
-changing `addressiq-web`, rebuild and re-embed it, then rebuild the app:
+The widget UI is the shared **web** widget, loaded from the SRI-pinned CDN at
+runtime. The SDK no longer ships a copy, so there is nothing to re-embed. To try a
+widget you are changing, serve it yourself and point the SDK at it — the override
+is unpinned, since a rebuilt widget cannot satisfy the fixed SRI hash:
 
 ```bash
-cd addressiq-web && npx rollup -c                                   # → dist/iqcollect.js
-cp dist/iqcollect.js ../addressiq-ios/Sources/AddressIQ/Resources/iqcollect.js
+cd addressiq-web && npx rollup -c && npx serve dist -p 5173         # → dist/iqcollect.js
+# then, on the AddressIQVerifyView, pass widgetURL: URL(string:
+#   "http://<your-mac-ip>:5173/iqcollect.js")  (development only)
 ```
 
 ---

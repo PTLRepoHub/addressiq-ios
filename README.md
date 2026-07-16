@@ -155,43 +155,45 @@ repository variables (see [`docs/RELEASE.md` §3](docs/RELEASE.md)); `developmen
 is a compile-time literal (`http://localhost:4000`). Use `.development` to run
 against a local backend; never ship a `.development` build.
 
-`AddressIQConfig.resolvedCdnUrl` (`AddressIQ.swift:64`) exposes the CDN base URL
-for the deployment, and the verify webview **does** load the widget from it —
-under an SRI pin. `Sources/AddressIQ/Views/AddressIQWebFlowView.swift:138-199`
-resolves the widget source in this order:
+`AddressIQConfig.resolvedCdnUrl` exposes the CDN base URL for the deployment, and
+the verify webview loads the widget from it under an SRI pin. **This is the only
+source — the SDK no longer ships a bundled widget.**
+`Sources/AddressIQ/Views/AddressIQWebFlowView.swift` resolves it in this order:
 
-1. **`widgetURL`** — explicit developer override, wins over everything.
+1. **`widgetURL`** — development-only developer override, wins over the CDN.
+   Unpinned, because a widget you are actively rebuilding cannot satisfy a fixed
+   SRI hash.
 2. **Pinned CDN build** — `{cdn}/v{widgetVersion}/iqcollect.js` loaded with
-   `integrity="{widgetIntegrity}" crossorigin="anonymous"`
-   (`AddressIQWebFlowView.swift:184-195`). WebKit **enforces** `integrity`, so
-   the CDN can only ever execute the exact bytes hashed at build time — the
-   version/hash pair is baked from `.widget-version` / `.widget-integrity`
-   (`Generated/BuildConfig.swift`), which the web repo's release fanout writes
-   from the same build the CDN serves. The CDN publishes immutable `/v{x.y.z}/`
-   paths and no floating alias, precisely because a mutable URL cannot be
-   SRI-pinned.
-3. **Bundled widget** (`Resources/iqcollect.js`) — the *fallback*, injected by
-   `onerror="__iqWidgetFallback()"`. That covers a CDN outage, an offline
-   device, **and** an SRI mismatch, so verification never depends on CDN uptime.
-   It is also the only source when the CDN path is off: `.development` never
-   uses the CDN, and an unbaked (empty) version or integrity disables it
-   (`AddressIQWebFlowView.swift:179-182`).
+   `integrity="{widgetIntegrity}" crossorigin="anonymous"`. WebKit **enforces**
+   `integrity`, so the CDN can only ever execute the exact bytes hashed at build
+   time — the version/hash pair is baked from `.widget-version` /
+   `.widget-integrity` (`Generated/BuildConfig.swift`), which the web repo's
+   release fanout writes from the same build the CDN serves. The checked-in
+   default is the currently published pin, so it works out of the box. `.development`
+   is **not** excluded any more: it loads the same pinned bundle (its CDN defaults
+   to production, overridable with `ADDRESSIQ_DEV_CDN_URL`), so a dev build finally
+   exercises the CDN + SRI path.
 
-If **neither** a pinned CDN build nor the bundle is available, the SDK still
-**fails closed** with `WIDGET_BUNDLE_MISSING` via `onFailed`
-(`AddressIQWebFlowView.swift:54-63`). An unpinned remote script is never loaded.
+> **There is no fallback, and verification now depends on the CDN.** A CDN outage,
+> an offline device, or an SRI mismatch is a **hard failure**: `onerror` reports
+> `WIDGET_LOAD_FAILED` through `onFailed` rather than leaving a blank WebView. The
+> SDK previously vendored `Resources/iqcollect.js` and degraded to it; that copy
+> is gone. **The collect UI cannot render without a network.**
 
-Three details in that markup are load-bearing — each fails *silently* toward
-"looks fine, but never actually uses the CDN":
+If no pinned CDN build is available (empty version/integrity) and no override was
+supplied, the SDK still **fails closed** with `WIDGET_PIN_MISSING` via `onFailed`
+(a packaging bug, distinct from the runtime `WIDGET_LOAD_FAILED`). An unpinned
+remote script is never loaded.
 
-- `crossorigin="anonymous"` is **mandatory**. Without it the cross-origin
-  response is opaque, `integrity` cannot be evaluated, and every load hard-fails
-  into the fallback.
-- **Script order.** A blocking classic `<script>` fires `onerror` before the
-  parser reaches the next inline script, so `__iqWidgetFallback()` must be
-  defined *before* the remote tag (and the tag must not be `defer`/`async`).
-- The inlined fallback bundle must be **escaped** — it contains
-  `</script>`-alike sequences that would otherwise terminate the tag.
+Two details in that markup are load-bearing:
+
+- `crossorigin="anonymous"` is **mandatory**. Without it the cross-origin response
+  is opaque, `integrity` cannot be evaluated, and every load hard-fails.
+- **Script order.** A blocking classic `<script>` fires `onerror` before the parser
+  reaches the next inline script, so `__iqWidgetLoadFailed()` must be defined
+  *before* the remote tag (and the tag must not be `defer`/`async`). The boot
+  script is guarded on `window.AddressIQ` so a failed load surfaces the reported
+  error instead of an opaque `undefined` throw.
 
 ## Example app
 
@@ -325,8 +327,8 @@ npx serve dist -p 5173
 Then set `ADDRESSIQ_DEV_WIDGET_URL` to `http://<host>:5173/iqcollect.js` for live
 reload without re-vendoring. Point it at a **published** URL
 (`https://cdn.addressiqpro.com/v0.5.3/iqcollect.js`) instead to exercise the
-remote-load + SRI + `onerror`-fallback paths, which `development` otherwise never
-takes because it inlines the bundled asset.
+the pinned CDN bundle — though `.development` now loads that by default, so this is
+only for pointing at a widget you are serving yourself.
 
 A `file://` path will **not** work: the Android emulator is a separate VM and
 cannot see your filesystem, and a physical device certainly cannot. It has to be

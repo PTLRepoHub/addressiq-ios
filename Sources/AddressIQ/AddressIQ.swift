@@ -64,9 +64,9 @@ public struct AddressIQConfig {
     /// Effective CDN base URL for this deployment.
     ///
     /// The verify widget is loaded from here at the immutable, SRI-pinned path
-    /// `{cdn}/v{BuildConfig.widgetVersion}/iqcollect.js`, falling back to the
-    /// bundled `Resources/iqcollect.js` on any failure. See AddressIQVerifyView
-    /// for the full model.
+    /// `{cdn}/v{BuildConfig.widgetVersion}/iqcollect.js`, and ONLY from here — the
+    /// SDK ships no bundled copy, so a failure surfaces WIDGET_LOAD_FAILED rather
+    /// than falling back. See AddressIQWebFlowView for the full model.
     public var resolvedCdnUrl: URL {
         return deployment.defaultCdnUrl
     }
@@ -170,13 +170,19 @@ public enum AddressIQDeployment: String {
     /// verify widget is loaded from here (SRI-pinned) with the bundled asset as
     /// the fallback. `.development` never loads remotely.
     public var defaultCdnUrl: URL {
+        // Development-only override (ADDRESSIQ_DEV_CDN_URL). Lets a dev build load
+        // the widget from a CDN you serve yourself.
+        if let o = devOverride("ADDRESSIQ_DEV_CDN_URL"), let url = URL(string: o) { return url }
         switch self {
         case .production:
             return URL(string: BuildConfig.prodCdnURL) ?? URL(string: "https://cdn.addressiqpro.com")!
         case .staging:
             return URL(string: BuildConfig.stagingCdnURL) ?? URL(string: "https://cdn-staging.addressiqpro.com")!
         case .development:
-            return URL(string: "http://localhost:4000")!
+            // NOT the dev host: the local backend serves no /v{x.y.z}/iqcollect.js,
+            // and the SDK ships no bundled copy, so a dev build loads the real
+            // pinned widget from the production CDN. Override with ADDRESSIQ_DEV_CDN_URL.
+            return URL(string: BuildConfig.prodCdnURL) ?? URL(string: "https://cdn.addressiqpro.com")!
         }
     }
 }

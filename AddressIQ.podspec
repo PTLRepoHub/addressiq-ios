@@ -29,10 +29,6 @@ Pod::Spec.new do |s|
   # does not compile (unnoticed until now because CI only ran `--quick` lint).
   s.dependency 'SwiftProtobuf', '~> 1.38'
 
-  # Mirrors Package.swift's .copy("Resources/iqcollect.js"). Without a resource
-  # bundle, `Bundle.module` in AddressIQWebFlowView.swift has no definition and
-  # the widget silently falls back to the hosted CDN URL.
-  # TODO: verify with a full `pod lib lint` that CocoaPods synthesises
-  # `Bundle.module` here — if not, the accessor needs a #if COCOAPODS shim.
-  s.resource_bundles = { 'AddressIQ' => ['Sources/AddressIQ/Resources/iqcollect.js'] }
+  # No resource bundle: the collect/verify widget is loaded from the SRI-pinned
+  # CDN, not shipped inside the pod.
 end
