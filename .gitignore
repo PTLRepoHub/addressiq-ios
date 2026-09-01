@@ -19,3 +19,5 @@ Package.resolved
 .env
 .env.*
 !.env.example
+example/AddressIQSample.xcodeproj/
+example/Generated/

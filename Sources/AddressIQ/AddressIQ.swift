@@ -16,6 +16,7 @@
 
 import Foundation
 import CoreLocation
+import os.log
 import Combine
 #if canImport(UIKit)
 import UIKit
@@ -64,7 +65,7 @@ public struct AddressIQConfig {
     /// Effective CDN base URL for this deployment.
     ///
     /// The verify widget is loaded from here at the immutable, SRI-pinned path
-    /// `{cdn}/v{BuildConfig.widgetVersion}/iqcollect.js`, and ONLY from here — the
+    /// `{cdn}/v{deployment.defaultWidgetVersion}/iqcollect.js`, and ONLY from here — the
     /// SDK ships no bundled copy, so a failure surfaces WIDGET_LOAD_FAILED rather
     /// than falling back. See AddressIQWebFlowView for the full model.
     public var resolvedCdnUrl: URL {
@@ -161,7 +162,9 @@ public enum AddressIQDeployment: String {
         case .staging:
             return URL(string: BuildConfig.stagingIngestURL) ?? URL(string: "https://ingest-api-staging.addressiqpro.com")!
         case .development:
-            return URL(string: "http://localhost:4000")!
+            // Ingest is its own service on its own port — 4000 is the API.
+            // See docker-compose.yml: api 4000, ingest 4001.
+            return URL(string: "http://localhost:4001")!
         }
     }
 
@@ -183,6 +186,25 @@ public enum AddressIQDeployment: String {
             // and the SDK ships no bundled copy, so a dev build loads the real
             // pinned widget from the production CDN. Override with ADDRESSIQ_DEV_CDN_URL.
             return URL(string: BuildConfig.prodCdnURL) ?? URL(string: "https://cdn.addressiqpro.com")!
+        }
+    }
+
+    /// Bare widget version pinned for this deployment. staging and prod are
+    /// pinned separately (their bundles differ byte-for-byte); `.development`
+    /// reuses the prod pin because it loads the widget from the prod CDN.
+    public var defaultWidgetVersion: String {
+        switch self {
+        case .production, .development: return BuildConfig.prodWidgetVersion
+        case .staging: return BuildConfig.stagingWidgetVersion
+        }
+    }
+
+    /// SRI hash pinned for this deployment's widget bundle. Must correspond to
+    /// `defaultWidgetVersion` on `defaultCdnUrl`, or the SRI check fails.
+    public var defaultWidgetIntegrity: String {
+        switch self {
+        case .production, .development: return BuildConfig.prodWidgetIntegrity
+        case .staging: return BuildConfig.stagingWidgetIntegrity
         }
     }
 }
@@ -427,13 +449,97 @@ public final class AddressIQ {
             self.state = .idle
             self.emitState()
         }
+        // Region crossings are the collection path. Wired here rather than at
+        // start-verification time because iOS relaunches a killed app straight
+        // into the delegate callback, and initialize() is what runs first.
+        locationManager.onTransition = { [weak self] kind, location, locationCode in
+            self?.recordTransitEvent(kind: kind, location: location, locationCode: locationCode)
+        }
         // Register the BGTaskScheduler handler so iOS can wake us for telemetry
         // flushes. Partners still need to declare the task identifier in their
         // Info.plist — see Phase 3 §iOS.
         AddressIQBackgroundScheduler.shared.register {
+            await self.recordBackgroundCheck()
             await self.flushTelemetryQueue()
         }
     }
+
+    /// Queue one event against `locationCode`, which is what ingest resolves the
+    /// geofence by.
+    ///
+    /// The code is taken from the monitored region rather than the in-memory
+    /// session: iOS relaunches a killed app straight into a region callback, and
+    /// at that point nothing in memory has been restored yet.
+    func recordTransitEvent(
+        kind: AddressIQTransitEvent.Kind,
+        location: CLLocation?,
+        locationCode: String
+    ) {
+        guard !locationCode.isEmpty else { return }
+
+        let coordinate = location
+            .map(\.coordinate)
+            .flatMap { CLLocationCoordinate2DIsValid($0) ? $0 : nil }
+        let event = AddressIQTransitEvent(
+            eventId: UUID().uuidString,
+            locationCode: locationCode,
+            kind: kind,
+            latitude: coordinate?.latitude,
+            longitude: coordinate?.longitude,
+            accuracyM: location?.horizontalAccuracy,
+            deviceTimestamp: location?.timestamp ?? Date(),
+            deviceSignals: AddressIQDeviceSignals.collect(location: location)
+        )
+        guard let json = event.jsonString() else { return }
+        AddressIQTelemetryQueue.shared.enqueue(eventJSON: json, eventId: event.eventId)
+
+        // A crossing wakes the app for a few seconds, so try to send now and
+        // leave the scheduled task as the fallback for when that is not enough.
+        Task { await self.flushTelemetryQueue() }
+        AddressIQBackgroundScheduler.shared.schedule()
+    }
+
+    /// Periodic evidence that the device is still where it claims, recorded each
+    /// time iOS grants a background window. Region crossings alone say nothing
+    /// about someone who simply stays home, which is the case being verified.
+    private func recordBackgroundCheck() async {
+        let sessionCode = queue.sync { self.activeLocationCode }
+        // After a relaunch nothing in memory is restored yet, but CoreLocation
+        // is still monitoring, so the region identifier stands in.
+        guard let locationCode = sessionCode ?? locationManager.monitoredIdentifier else { return }
+
+        // A cached fix from hours ago is not evidence of where the device is
+        // now. Better to record nothing than to record it as current.
+        //
+        // Region monitoring is edge-triggered, so someone asleep at home crosses
+        // nothing all night and the cached fix ages out — leaving the overnight
+        // hours, the ones that actually evidence residency, with no readings at
+        // all. So when the cache is stale, ask for a current fix rather than
+        // giving up. The request is bounded well inside the background window,
+        // and yields nil if the OS declines or is slow, which lands on the same
+        // "record nothing" as before.
+        var location = locationManager.lastKnownLocation
+        if !Self.isFixFresh(location) {
+            location = await locationManager.requestFreshLocation(
+                timeout: Self.backgroundFixTimeout
+            )
+        }
+
+        guard let location, Self.isFixFresh(location) else { return }
+        recordTransitEvent(kind: .backgroundCheck, location: location, locationCode: locationCode)
+    }
+
+    private static func isFixFresh(_ location: CLLocation?) -> Bool {
+        guard let location else { return false }
+        return Date().timeIntervalSince(location.timestamp) <= backgroundCheckMaxFixAge
+    }
+
+    /// Oldest cached fix still worth reporting as a background check.
+    private static let backgroundCheckMaxFixAge: TimeInterval = 15 * 60
+
+    /// Bounded well inside the ~30s the background task gets, leaving room for
+    /// the queue flush that follows.
+    private static let backgroundFixTimeout: TimeInterval = 10
 
     private func flushTelemetryQueue() async {
         let batch = AddressIQTelemetryQueue.shared.dequeue(batchSize: 50)
@@ -445,8 +551,15 @@ public final class AddressIQ {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
         request.httpBody = body.data(using: .utf8)
+        // Any 2xx, not just 200. `POST /v1/transit-events/batch` is a NestJS
+        // @Post and answers 201 Created, so an exact `== 200` never
+        // acknowledged: the rows stayed on the queue and the same batch was
+        // re-uploaded on every flush, for the life of the install. Ingest
+        // deduplicates by eventId so nothing was corrupted server-side — the
+        // queue simply never drained, and grew without bound.
         if let (_, response) = try? await URLSession.shared.data(for: request),
-           (response as? HTTPURLResponse)?.statusCode == 200
+           let http = response as? HTTPURLResponse,
+           (200..<300).contains(http.statusCode)
         {
             AddressIQTelemetryQueue.shared.acknowledge(rowIds: batch.map { $0.id })
         }
@@ -751,13 +864,49 @@ public final class AddressIQ {
         guard !verificationCode.isEmpty else { return }
         markActiveSession(locationCode: locationCode, verificationId: verificationCode)
         if let geofence {
+            // Identified by LOCATION code, not verification code: the identifier
+            // is all a relaunched process has, and it is the key ingest resolves
+            // the geofence by.
             locationManager.startMonitoring(
                 latitude: geofence.lat,
                 longitude: geofence.lon,
                 radius: geofence.radiusM,
-                identifier: verificationCode
+                identifier: locationCode
             )
         }
+    }
+
+    /**
+     Begin collecting for a verification this SDK did not start.
+
+     The Flutter and React Native SDKs make their own REST call and then need
+     the native collection path — geofence monitoring, device signals, the
+     encrypted queue, background scheduling — to run underneath. Without a
+     public entry they reimplemented all of it, and neither reimplementation
+     collected a single device signal, so every fraud check was dark on those
+     platforms.
+
+     `activateCollection` is the internal equivalent used by `start*`; this is
+     the same behaviour with the arguments a wrapper actually has. Best-effort
+     in the same way: a monitoring failure never throws, because the
+     verification has already been created server-side by the caller.
+     */
+    public func startCollecting(
+        locationCode: String,
+        verificationCode: String,
+        latitude: Double?,
+        longitude: Double?,
+        radiusM: Double?
+    ) {
+        let geofence: AddressIQGeofence? = {
+            guard let latitude, let longitude else { return nil }
+            return AddressIQGeofence(lat: latitude, lon: longitude, radiusM: radiusM ?? 150)
+        }()
+        activateCollection(
+            locationCode: locationCode,
+            verificationCode: verificationCode,
+            geofence: geofence
+        )
     }
 
     private func requireInitialized() throws -> AddressIQConfig {
@@ -799,11 +948,100 @@ public final class AddressIQ {
     }
 }
 
-/// Wraps CLLocationManager + geofence registration. Phase 3 ships the
-/// public surface; the per-region monitoring details are filled in
-/// alongside the protobuf-aligned telemetry envelope (P3.7).
+/// Wraps CLLocationManager + geofence registration, and turns region crossings
+/// into telemetry.
+///
+/// Region monitoring is what makes collection survive the app being killed: iOS
+/// relaunches the host on a crossing and delivers it to the delegate.
 final class AddressIQLocationManager: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
+
+    /// Raised on every crossing, carrying the region's identifier. Region
+    /// callbacks bring no fix of their own, so the manager's last known location
+    /// is passed alongside.
+    var onTransition: ((AddressIQTransitEvent.Kind, CLLocation?, String) -> Void)?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        // The one-shot background fix runs on battery, in a window iOS grants
+        // grudgingly. Ten metres is well inside the smallest geofence we
+        // register, so the default best-available accuracy would spend power
+        // and time resolving a precision the decision cannot use.
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+    }
+
+    /// Most recent fix, for the periodic background check. Reading this does not
+    /// start location updates.
+    var lastKnownLocation: CLLocation? { manager.location }
+
+    /// Continuations waiting on `requestFreshLocation`. Guarded by `stateLock`,
+    /// because CoreLocation calls back on the main queue while the background
+    /// task awaits on its own.
+    private var fixWaiters: [CheckedContinuation<CLLocation?, Never>] = []
+    private let stateLock = NSLock()
+
+    /**
+     Ask CoreLocation for one current fix, giving up after `timeout`.
+
+     `manager.location` is only whatever CoreLocation last happened to produce.
+     With region monitoring alone — which is edge-triggered — a device sitting
+     still at home overnight produces nothing, so the cached fix ages out and the
+     periodic background check has nothing recent enough to report. That is
+     precisely the resident being verified, and precisely when evidence matters.
+
+     Returns nil rather than throwing when the OS declines or is too slow: the
+     caller then records nothing, which is the same outcome as before this
+     existed. It can only add readings, never fabricate one.
+     */
+    func requestFreshLocation(timeout: TimeInterval) async -> CLLocation? {
+        // Only meaningful with an authorization that survives backgrounding.
+        // Asking without one wakes the radio for a callback that never arrives.
+        let status: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            status = manager.authorizationStatus
+        } else {
+            status = CLLocationManager.authorizationStatus()
+        }
+        guard status == .authorizedAlways else { return nil }
+        return await awaitFix(timeout: timeout)
+    }
+
+    /// Asks for a fix and waits, with no view on whether asking was allowed.
+    /// Split from the check above so each half can be exercised on its own —
+    /// the simulator never grants `authorizedAlways`, so the waiting half is
+    /// otherwise unreachable in a test.
+    func awaitFix(timeout: TimeInterval) async -> CLLocation? {
+        return await withCheckedContinuation { (continuation: CheckedContinuation<CLLocation?, Never>) in
+            stateLock.lock()
+            fixWaiters.append(continuation)
+            let isFirst = fixWaiters.count == 1
+            stateLock.unlock()
+
+            // One in-flight request serves every waiter; requestLocation()
+            // cancels the previous one if called again.
+            if isFirst {
+                DispatchQueue.main.async { self.manager.requestLocation() }
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                    self.resolveFixWaiters(with: nil)
+                }
+            }
+        }
+    }
+
+    /// Resumes every waiter exactly once. A continuation resumed twice traps, so
+    /// the list is drained under the lock before any of them is touched.
+    private func resolveFixWaiters(with location: CLLocation?) {
+        stateLock.lock()
+        let waiters = fixWaiters
+        fixWaiters.removeAll()
+        stateLock.unlock()
+        for waiter in waiters { waiter.resume(returning: location) }
+    }
+
+    /// Identifier of the region still being monitored. CoreLocation keeps
+    /// monitoring across launches, so this outlives the in-memory session.
+    var monitoredIdentifier: String? { manager.monitoredRegions.first?.identifier }
 
     func startMonitoring(latitude: Double, longitude: Double, radius: Double, identifier: String) {
         let region = CLCircularRegion(
@@ -813,12 +1051,74 @@ final class AddressIQLocationManager: NSObject, CLLocationManagerDelegate {
         )
         region.notifyOnEntry = true
         region.notifyOnExit = true
+
+        // Release whatever was being monitored first. CoreLocation keeps
+        // regions across launches and caps an app at 20 of them; past that,
+        // `startMonitoring(for:)` fails silently and the SDK collects nothing
+        // for the rest of the install's life. The SDK only ever has one active
+        // verification, so anything still registered is from a finished one.
+        for stale in manager.monitoredRegions where stale.identifier != identifier {
+            manager.stopMonitoring(for: stale)
+        }
+
         manager.startMonitoring(for: region)
+        // Someone who is already home when the verification starts crosses
+        // nothing, so no entry is raised until they leave and come back. Ask for
+        // the current state to record that they are inside from the outset.
+        manager.requestState(for: region)
     }
 
     func stopMonitoring() {
         for region in manager.monitoredRegions {
             manager.stopMonitoring(for: region)
         }
+    }
+
+    // MARK: - CLLocationManagerDelegate
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        resolveFixWaiters(with: locations.last)
+    }
+
+    /// Region registration failing is otherwise completely silent: monitoring
+    /// simply never starts and no event is ever produced. The common cause is
+    /// CoreLocation's 20-region-per-app cap, which is why stale regions are
+    /// released in `startMonitoring`.
+    func locationManager(
+        _ manager: CLLocationManager,
+        monitoringDidFailFor region: CLRegion?,
+        withError error: Error
+    ) {
+        os_log(
+            "AddressIQ: geofence registration failed for %{public}@ — %{public}@ (monitoring %d region(s))",
+            log: .default,
+            type: .error,
+            region?.identifier ?? "unknown",
+            error.localizedDescription,
+            manager.monitoredRegions.count
+        )
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // A failed fix is indistinguishable from a slow one for our purposes:
+        // either way there is nothing current to report.
+        resolveFixWaiters(with: nil)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        onTransition?(.enter, manager.location, region.identifier)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+        onTransition?(.exit, manager.location, region.identifier)
+    }
+
+    func locationManager(
+        _ manager: CLLocationManager,
+        didDetermineState state: CLRegionState,
+        for region: CLRegion
+    ) {
+        guard state == .inside else { return }
+        onTransition?(.enter, manager.location, region.identifier)
     }
 }

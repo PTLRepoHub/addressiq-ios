@@ -56,3 +56,168 @@ jobs:
           fi
       - name: SwiftPM note
         run: echo "SwiftPM consumers resolve the git tag v${GITHUB_REF_NAME#v} directly — no publish needed."
+
+  # ---------------------------------------------------------------------------
+  # Demo app: TestFlight + a downloadable build on the release page.
+  #
+  # The sample under example/ is a SwiftPM executable package, which cannot
+  # produce an .ipa. example/project.yml is an XcodeGen spec for the same
+  # sources as a real iOS application target; we generate the project here,
+  # archive it against the LOCAL SDK, and ship it.
+  #
+  # Signing / TestFlight is gated on the App Store Connect API key. With the
+  # secrets present the job archives with automatic signing
+  # (-allowProvisioningUpdates), exports an App Store .ipa, uploads it to
+  # TestFlight and attaches it to the GitHub release. Without them it still
+  # produces an unsigned .app zip so the release always carries a build.
+  #
+  # Secrets:  APPSTORE_KEY_ID, APPSTORE_ISSUER_ID, APPSTORE_KEY_P8 (the raw
+  #           .p8 contents), APPLE_TEAM_ID
+  # Variable: IOS_DEMO_BUNDLE_ID — the App ID registered for the demo. Must
+  #           exist in the Apple Developer portal for TestFlight to accept it.
+  # ---------------------------------------------------------------------------
+  demo-ios:
+    name: Demo app · TestFlight
+    runs-on: macos-latest
+    permissions:
+      contents: write # attaches the build to the GitHub release
+    env:
+      SCHEME: AddressIQSample
+      BUNDLE_ID: ${{ vars.IOS_DEMO_BUNDLE_ID || 'com.addressiqpro.sample' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bake build config (staging + production)
+        env:
+          STAGING_ADDRESSIQ_API_BASE_URL: ${{ vars.STAGING_ADDRESSIQ_API_BASE_URL }}
+          STAGING_ADDRESSIQ_INGEST_BASE_URL: ${{ vars.STAGING_ADDRESSIQ_INGEST_BASE_URL }}
+          STAGING_ADDRESSIQ_CDN_BASE_URL: ${{ vars.STAGING_ADDRESSIQ_CDN_BASE_URL }}
+          PROD_ADDRESSIQ_API_BASE_URL: ${{ vars.PROD_ADDRESSIQ_API_BASE_URL }}
+          PROD_ADDRESSIQ_INGEST_BASE_URL: ${{ vars.PROD_ADDRESSIQ_INGEST_BASE_URL }}
+          PROD_ADDRESSIQ_CDN_BASE_URL: ${{ vars.PROD_ADDRESSIQ_CDN_BASE_URL }}
+        run: scripts/bake-build-config.sh --strict
+
+      - name: Version numbers
+        id: v
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0"; fi
+          echo "marketing=$V" >> "$GITHUB_OUTPUT"
+          # App Store Connect rejects a duplicate build number for a version;
+          # the monotonic run number is the cheapest thing that never repeats.
+          echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the Xcode project
+        working-directory: example
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # Present only when all four App Store Connect inputs are configured.
+      - name: Install the App Store Connect API key
+        id: asc
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_P8: ${{ secrets.APPSTORE_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPSTORE_KEY_ID:-}" ] || [ -z "${APPSTORE_ISSUER_ID:-}" ] \
+             || [ -z "${APPSTORE_KEY_P8:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
+            echo "::warning::App Store Connect secrets not configured — building unsigned, skipping TestFlight."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p ~/private_keys
+          printf '%s' "$APPSTORE_KEY_P8" > ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Archive + export
+        id: build
+        working-directory: example
+        env:
+          SIGNED: ${{ steps.asc.outputs.signed }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MARKETING: ${{ steps.v.outputs.marketing }}
+          BUILD_NUM: ${{ steps.v.outputs.build }}
+        run: |
+          set -euo pipefail
+          COMMON=(-project "$SCHEME.xcodeproj" -scheme "$SCHEME" -configuration Release
+                  -destination 'generic/platform=iOS'
+                  PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID"
+                  MARKETING_VERSION="$MARKETING"
+                  CURRENT_PROJECT_VERSION="$BUILD_NUM")
+
+          if [ "$SIGNED" != "true" ]; then
+            # No credentials: an unsigned device build. Not installable on a
+            # device, but it proves the release archives and gives the release
+            # page something concrete.
+            xcodebuild build "${COMMON[@]}" \
+              -derivedDataPath build CODE_SIGNING_ALLOWED=NO
+            APP=$(find build/Build/Products -maxdepth 2 -name '*.app' | head -1)
+            OUT="$PWD/../addressiq-ios-sample-${MARKETING}-unsigned.zip"
+            ( cd "$(dirname "$APP")" && zip -qry "$OUT" "$(basename "$APP")" )
+            echo "artifact=addressiq-ios-sample-${MARKETING}-unsigned.zip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          xcodebuild archive "${COMMON[@]}" \
+            -archivePath build/"$SCHEME".xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
+            -authenticationKeyID "$APPSTORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+
+          # Written with printf, not a heredoc: a heredoc inside this indented
+          # YAML block would leave leading spaces before <?xml, which makes the
+          # plist unparseable.
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict>' \
+            '<key>method</key><string>app-store-connect</string>' \
+            "<key>teamID</key><string>${APPLE_TEAM_ID}</string>" \
+            '<key>destination</key><string>export</string>' \
+            '<key>signingStyle</key><string>automatic</string>' \
+            '<key>uploadSymbols</key><true/>' \
+            '</dict></plist>' > build/ExportOptions.plist
+
+          xcodebuild -exportArchive \
+            -archivePath build/"$SCHEME".xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
+            -authenticationKeyID "$APPSTORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
+
+          IPA=$(find build/export -name '*.ipa' | head -1)
+          mv "$IPA" "../addressiq-ios-sample-${MARKETING}.ipa"
+          echo "artifact=addressiq-ios-sample-${MARKETING}.ipa" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to TestFlight
+        if: steps.asc.outputs.signed == 'true'
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          xcrun altool --upload-app -t ios \
+            -f "${{ steps.build.outputs.artifact }}" \
+            --apiKey "$APPSTORE_KEY_ID" --apiIssuer "$APPSTORE_ISSUER_ID"
+          echo "Uploaded to TestFlight — processing takes a few minutes before testers see it."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-demo
+          path: ${{ steps.build.outputs.artifact }}
+
+      - name: Attach to the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.build.outputs.artifact }}" --clobber

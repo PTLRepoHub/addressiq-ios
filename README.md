@@ -267,6 +267,24 @@ generated app's `Info.plist` **must** include
 — without the Always-usage key the permission step hangs (iOS silently no-ops
 `requestAlwaysAuthorization`).
 
+### Overnight collection is load-bearing
+
+A digital verification is decided on evidence of repeat presence, and the
+backend counts *night cycles* — distinct overnight periods carrying more than
+one reading inside the geofence. Region monitoring alone cannot supply them: it
+is edge-triggered, so a resident asleep at home crosses nothing between dusk and
+morning. The periodic background check exists to fill exactly those hours, and
+it asks CoreLocation for a current fix when the cached one has aged out.
+
+That request only works with **Always** authorization and
+`BGTaskSchedulerPermittedIdentifiers` containing
+`com.addressiq.sdk.telemetry-sync`. Granted only *When In Use*, or without the
+background task identifier declared, the SDK still collects region crossings and
+still uploads them — nothing errors, nothing is dropped — but it banks no
+overnight evidence, and every verification on that install runs its full window
+out and resolves as undecided. It is the quietest way to make verification
+fail, so it is worth checking first when results come back inconclusive.
+
 ## Develop
 
 ```bash

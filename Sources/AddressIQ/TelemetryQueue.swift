@@ -16,6 +16,20 @@ public final class AddressIQTelemetryQueue {
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "com.addressiq.telemetry")
 
+    /// SQLite must copy bound text, not alias it.
+    ///
+    /// Passing `nil` here means SQLITE_STATIC — "this buffer outlives the
+    /// statement". It does not: bridging a Swift `String` to `UnsafePointer<CChar>`
+    /// produces a temporary that is deallocated the moment the call returns, so
+    /// SQLite reads freed memory at `sqlite3_step` and stores whatever is there
+    /// — often an empty string. It only *looked* correct in unit tests because
+    /// the freed page usually still held the bytes; on a real device, under a
+    /// geofence callback, it did not.
+    private static let SQLITE_TRANSIENT = unsafeBitCast(
+        -1,
+        to: sqlite3_destructor_type.self
+    )
+
     public init() {
         do {
             try openDatabase()
@@ -35,8 +49,8 @@ public final class AddressIQTelemetryQueue {
             let sql = "INSERT OR IGNORE INTO events(event_id, payload, queued_at) VALUES(?, ?, ?)"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(stmt, 1, eventId, -1, nil)
-            sqlite3_bind_text(stmt, 2, eventJSON, -1, nil)
+            sqlite3_bind_text(stmt, 1, eventId, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, eventJSON, -1, Self.SQLITE_TRANSIENT)
             sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)

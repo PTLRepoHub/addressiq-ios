@@ -17,13 +17,15 @@
 // literal in AddressIQEnvironment. Never ship a build configured for
 // `.development`.
 //
-// The two widget pins come from FILES at the repo root — `.widget-version` and
-// `.widget-integrity` — which the web repo's widget-fanout workflow writes on
-// every web release. `widgetVersion` is stored BARE ("0.4.0", any leading "v"
-// stripped); the CDN serves immutable paths under /v{x.y.z}/, so the URL is
-// built as "\(cdn)/v\(widgetVersion)/iqcollect.js". Empty strings mean "no pin
-// published yet" and disable the CDN path — the SDK then inlines the bundled
-// widget. Never hand-write a hash here.
+// The widget pins come from FILES at the repo root — `.widget-version-staging`,
+// `.widget-integrity-staging`, `.widget-version-prod`, `.widget-integrity-prod`
+// — which the web repo's widget-fanout workflow writes on every web release.
+// staging and prod are pinned SEPARATELY: their bundles differ byte-for-byte
+// (per-environment Maps key) so the SRI hashes differ. `widgetVersion` is
+// stored BARE ("0.5.3", any leading "v" stripped); the CDN serves immutable
+// paths under /v{x.y.z}/, so the URL is built as
+// "\(cdn)/v\(widgetVersion)/iqcollect.js". Empty strings mean "no pin published
+// yet" and disable the CDN path for that deployment. Never hand-write a hash.
 enum BuildConfig {
     static let stagingApiURL = "https://api-staging.addressiqpro.com"
     static let stagingIngestURL = "https://ingest-api-staging.addressiqpro.com"
@@ -33,8 +35,12 @@ enum BuildConfig {
     static let prodIngestURL = "https://ingest-api.addressiqpro.com"
     static let prodCdnURL = "https://cdn.addressiqpro.com"
 
-    /// Bare semver of the published web widget, e.g. "0.4.0". Empty ⇒ no CDN pin.
-    static let widgetVersion = "0.5.3"
-    /// Subresource-integrity hash of that widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
-    static let widgetIntegrity = "sha384-wUErWmll1WWgesjXvSN93KLxHTDLNXdZ4FMR9nT2tQ7tpdBdEuQCDMkHgdssRvkb"
+    /// Bare semver of the STAGING web widget, e.g. "0.5.3". Empty ⇒ no CDN pin.
+    static let stagingWidgetVersion = "0.5.3"
+    /// SRI hash of the staging widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
+    static let stagingWidgetIntegrity = "sha384-Q7LZd2vji9K0ulAu866ywpCzIj0aoaZAl9n9Ghw1lkf8aT84y++RT/9rHcAIuYJB"
+    /// Bare semver of the PRODUCTION web widget, e.g. "0.5.3". Empty ⇒ no CDN pin.
+    static let prodWidgetVersion = "0.5.3"
+    /// SRI hash of the production widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
+    static let prodWidgetIntegrity = "sha384-wUErWmll1WWgesjXvSN93KLxHTDLNXdZ4FMR9nT2tQ7tpdBdEuQCDMkHgdssRvkb"
 }

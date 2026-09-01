@@ -81,7 +81,12 @@ struct AddressIQWebFlowView: UIViewRepresentable {
         // fallback when the integrator explicitly provided one.
         var cfg: [String: Any] = [
             "apiKey": apiKey,
-            "apiUrl": apiURL.absoluteString,
+            // The widget resolves its OWN API/ingest hosts from this enum
+            // (`resolveEnvironmentUrls`) and never reads a URL out of its config.
+            // Omitting it defaults the widget to production, which is how a
+            // staging build loaded the staging bundle from the staging CDN and
+            // then called the PRODUCTION API.
+            "environment": deployment.rawValue,
             "appUserId": appUserId,
             // Drives the platform-specific "Location permission" Settings screen.
             "platform": "ios",
@@ -96,8 +101,8 @@ struct AddressIQWebFlowView: UIViewRepresentable {
             widgetURL: widgetURL,
             deployment: deployment,
             cdnBaseURL: cdnBaseURL,
-            widgetVersion: BuildConfig.widgetVersion,
-            widgetIntegrity: BuildConfig.widgetIntegrity
+            widgetVersion: deployment.defaultWidgetVersion,
+            widgetIntegrity: deployment.defaultWidgetIntegrity
         ) else {
             return nil
         }

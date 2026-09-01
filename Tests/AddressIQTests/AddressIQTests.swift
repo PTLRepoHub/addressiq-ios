@@ -35,7 +35,13 @@ final class AddressIQTests: XCTestCase {
 
     func testDevelopmentIngestResolvesLocalhost() {
         let config = AddressIQConfig(apiKey: "aiq_test_key", deployment: .development)
-        XCTAssertEqual(config.resolvedIngestUrl, URL(string: "http://localhost:4000")!)
+        // Port 4001, not 4000. Ingest is a separate service from the API in the
+        // dev stack (docker-compose.yml: api 4000, ingest 4001), and this used
+        // to resolve to 4000 — so transit-event batches were posted at the API,
+        // which has no such route. Development was the only deployment where
+        // these two collapsed onto one host.
+        XCTAssertEqual(config.resolvedIngestUrl, URL(string: "http://localhost:4001")!)
+        XCTAssertNotEqual(config.resolvedIngestUrl, config.resolvedApiUrl)
     }
 
     // MARK: - Per-deployment CDN (baked from PROD_/STAGING_ADDRESSIQ_CDN_BASE_URL)

@@ -87,19 +87,32 @@ read_pin() {
   head -n1 "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
-WIDGET_VERSION="$(read_pin .widget-version)"
-WIDGET_VERSION="${WIDGET_VERSION#v}"   # store bare "0.4.0"; the CDN path re-adds "v"
-WIDGET_INTEGRITY="$(read_pin .widget-integrity)"
+# Per-deployment pins: staging and prod publish the widget independently, so
+# their bundles differ byte-for-byte (per-environment Maps key) → different SRI
+# hashes. Each deployment must load its OWN bundle with its OWN hash.
+STAGING_WIDGET_VERSION="$(read_pin .widget-version-staging)"
+STAGING_WIDGET_VERSION="${STAGING_WIDGET_VERSION#v}"   # store bare "0.5.3"; the CDN path re-adds "v"
+STAGING_WIDGET_INTEGRITY="$(read_pin .widget-integrity-staging)"
+PROD_WIDGET_VERSION="$(read_pin .widget-version-prod)"
+PROD_WIDGET_VERSION="${PROD_WIDGET_VERSION#v}"
+PROD_WIDGET_INTEGRITY="$(read_pin .widget-integrity-prod)"
 
-# Both pins are required together: a version with no hash would load an
-# unverified script, a hash with no version has nothing to pin. Either one
-# missing disables the CDN path.
-if [ -z "$WIDGET_VERSION" ] || [ -z "$WIDGET_INTEGRITY" ]; then
-  if [ -n "$WIDGET_VERSION$WIDGET_INTEGRITY" ]; then
-    echo "[bake] warning: only one of .widget-version/.widget-integrity is set; disabling the CDN widget path" >&2
+# Both pins of a deployment are required together: a version with no hash would
+# load an unverified script, a hash with no version has nothing to pin. Either
+# one missing disables the CDN path for THAT deployment.
+if [ -z "$STAGING_WIDGET_VERSION" ] || [ -z "$STAGING_WIDGET_INTEGRITY" ]; then
+  if [ -n "$STAGING_WIDGET_VERSION$STAGING_WIDGET_INTEGRITY" ]; then
+    echo "[bake] warning: only one of .widget-version-staging/.widget-integrity-staging is set; disabling the staging CDN widget path" >&2
   fi
-  WIDGET_VERSION=""
-  WIDGET_INTEGRITY=""
+  STAGING_WIDGET_VERSION=""
+  STAGING_WIDGET_INTEGRITY=""
+fi
+if [ -z "$PROD_WIDGET_VERSION" ] || [ -z "$PROD_WIDGET_INTEGRITY" ]; then
+  if [ -n "$PROD_WIDGET_VERSION$PROD_WIDGET_INTEGRITY" ]; then
+    echo "[bake] warning: only one of .widget-version-prod/.widget-integrity-prod is set; disabling the prod CDN widget path" >&2
+  fi
+  PROD_WIDGET_VERSION=""
+  PROD_WIDGET_INTEGRITY=""
 fi
 
 cat > "$OUT" <<EOF
@@ -122,13 +135,15 @@ cat > "$OUT" <<EOF
 // literal in AddressIQEnvironment. Never ship a build configured for
 // \`.development\`.
 //
-// The two widget pins come from FILES at the repo root — \`.widget-version\` and
-// \`.widget-integrity\` — which the web repo's widget-fanout workflow writes on
-// every web release. \`widgetVersion\` is stored BARE ("0.4.0", any leading "v"
-// stripped); the CDN serves immutable paths under /v{x.y.z}/, so the URL is
-// built as "\(cdn)/v\(widgetVersion)/iqcollect.js". Empty strings mean "no pin
-// published yet" and disable the CDN path — the SDK then inlines the bundled
-// widget. Never hand-write a hash here.
+// The widget pins come from FILES at the repo root — \`.widget-version-staging\`,
+// \`.widget-integrity-staging\`, \`.widget-version-prod\`, \`.widget-integrity-prod\`
+// — which the web repo's widget-fanout workflow writes on every web release.
+// staging and prod are pinned SEPARATELY: their bundles differ byte-for-byte
+// (per-environment Maps key) so the SRI hashes differ. \`widgetVersion\` is
+// stored BARE ("0.5.3", any leading "v" stripped); the CDN serves immutable
+// paths under /v{x.y.z}/, so the URL is built as
+// "\(cdn)/v\(widgetVersion)/iqcollect.js". Empty strings mean "no pin published
+// yet" and disable the CDN path for that deployment. Never hand-write a hash.
 enum BuildConfig {
     static let stagingApiURL = "$V_STAGING_ADDRESSIQ_API_BASE_URL"
     static let stagingIngestURL = "$V_STAGING_ADDRESSIQ_INGEST_BASE_URL"
@@ -138,10 +153,14 @@ enum BuildConfig {
     static let prodIngestURL = "$V_PROD_ADDRESSIQ_INGEST_BASE_URL"
     static let prodCdnURL = "$V_PROD_ADDRESSIQ_CDN_BASE_URL"
 
-    /// Bare semver of the published web widget, e.g. "0.4.0". Empty ⇒ no CDN pin.
-    static let widgetVersion = "$WIDGET_VERSION"
-    /// Subresource-integrity hash of that widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
-    static let widgetIntegrity = "$WIDGET_INTEGRITY"
+    /// Bare semver of the STAGING web widget, e.g. "0.5.3". Empty ⇒ no CDN pin.
+    static let stagingWidgetVersion = "$STAGING_WIDGET_VERSION"
+    /// SRI hash of the staging widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
+    static let stagingWidgetIntegrity = "$STAGING_WIDGET_INTEGRITY"
+    /// Bare semver of the PRODUCTION web widget, e.g. "0.5.3". Empty ⇒ no CDN pin.
+    static let prodWidgetVersion = "$PROD_WIDGET_VERSION"
+    /// SRI hash of the production widget, e.g. "sha384-…". Empty ⇒ no CDN pin.
+    static let prodWidgetIntegrity = "$PROD_WIDGET_INTEGRITY"
 }
 EOF
 

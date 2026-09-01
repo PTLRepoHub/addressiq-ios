@@ -1,0 +1,105 @@
+# XcodeGen spec for the sample app.
+#
+# The sample is a SwiftPM executable package (Package.swift) so `xcodebuild
+# build` and `swift build` work with no generated state checked in. That is
+# enough for CI, but NOT enough to ship: an .ipa — and therefore TestFlight —
+# requires a real iOS *application* target with an Info.plist and a bundle
+# identifier, which SwiftPM cannot produce.
+#
+# So the release workflow runs `xcodegen generate` here to materialise
+# AddressIQSample.xcodeproj from this spec, archives it, and uploads the
+# result to TestFlight. The generated project is disposable — never commit it.
+#
+#   brew install xcodegen && xcodegen generate   # to reproduce locally
+name: AddressIQSample
+options:
+  bundleIdPrefix: com.addressiqpro
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  # The LOCAL SDK at the repo root — same dependency the sample's Package.swift
+  # declares via `.package(path: "..")`, so the archived app carries the exact
+  # SDK being released (with its baked build config).
+  AddressIQ:
+    path: ..
+
+targets:
+  AddressIQSample:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/AddressIQSample
+    dependencies:
+      - package: AddressIQ
+        product: AddressIQ
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: AddressIQ Sample
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # The SDK's verification flow needs foreground location, and the
+        # background-permission helper escalates to always-on.
+        NSLocationWhenInUseUsageDescription: >-
+          AddressIQ uses your location to verify the address you are adding.
+        NSLocationAlwaysAndWhenInUseUsageDescription: >-
+          AddressIQ verifies your address in the background so you don't have to
+          keep the app open.
+        UIBackgroundModes:
+          - location
+    settings:
+      base:
+        # Overridden on the xcodebuild command line by the release workflow
+        # (IOS_DEMO_BUNDLE_ID repo variable) — this default only has to be
+        # valid, not registered, for unsigned simulator builds.
+        PRODUCT_BUNDLE_IDENTIFIER: com.addressiqpro.sample
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # iPhone only. Declaring iPad support while the app is portrait-locked
+        # trips Xcode's "All interface orientations must be supported" warning,
+        # and App Store Connect enforces it on upload.
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: NO
+
+  # Hosted in the sample app, deliberately. CoreLocation region monitoring
+  # needs location authorization, and authorization is granted per *app bundle
+  # id* — a SwiftPM test bundle has none, so `simctl privacy grant` has nothing
+  # to attach to and the device-side geofence path can never run there. Hosting
+  # the tests in AddressIQSample gives the grant a target (com.addressiqpro.sample)
+  # and puts the SDK on a real device surface, which is the whole point.
+  AddressIQSampleTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/AddressIQSampleTests
+    dependencies:
+      - target: AddressIQSample
+      - package: AddressIQ
+        product: AddressIQ
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AddressIQSample.app/AddressIQSample"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  AddressIQSample:
+    build:
+      targets:
+        AddressIQSample: all
+        AddressIQSampleTests: [test]
+    test:
+      config: Debug
+      targets:
+        - AddressIQSampleTests
+    archive:
+      config: Release
+    run:
+      config: Debug
