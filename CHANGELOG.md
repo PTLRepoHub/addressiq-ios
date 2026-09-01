@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.7.0...v0.8.0) (2026-09-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* `AddressIQEnvironment` is renamed to `AddressIQDeployment` and `.sandbox` is removed. Integrators referencing the old type or case must update.
+* The SDK no longer ships a vendored `iqcollect.js`. The widget is loaded from the CDN at runtime against a pinned version and SRI hash.
+
+### Features
+
+* **config:** rename `AddressIQEnvironment` to `AddressIQDeployment`; drop `.sandbox`
+* **config:** dev-only env overrides for hosts and the Maps key
+* **widget:** drop the vendored bundle; the pinned CDN copy is the only source
+
+### Bug Fixes
+
+* **telemetry:** copy bound text into SQLite. `sqlite3_bind_text` passed a nil destructor, promising that a bridged Swift `String` outlives the statement; it does not, so queued payloads were read from freed memory and usually stored empty.
+* **telemetry:** acknowledge any 2xx, not only 200. The ingest batch endpoint answers 201, so uploaded rows were never deleted and the same batch re-uploaded on every flush for the life of the install.
+* **config:** resolve development ingest to port 4001. It resolved to 4000, which is the API — development was the only deployment where the two hosts collapsed onto one.
+* **location:** release stale geofence regions before monitoring a new one, and report registration failures. CoreLocation caps an app at 20 regions and keeps them across launches, so collection stopped silently once the cap was reached.
+
 ## [0.7.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.6.0...v0.7.0) (2026-07-12)
 
 

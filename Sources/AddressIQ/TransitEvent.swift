@@ -17,7 +17,7 @@ struct AddressIQTransitEvent {
     /// collection health cannot be measured and a fraud-signal gap cannot be
     /// attributed to a platform. Tokens match the idempotency-key vocabulary
     /// (`iqidem_ios_*`), per SDK contract §6.6.
-    static let sdkVersion = "ios/0.7.0"
+    static let sdkVersion = "ios/0.8.0"
 
     /// Event types the ingest DTO accepts. iOS raises the region ones plus the
     /// periodic check; the rest are other platforms'.
