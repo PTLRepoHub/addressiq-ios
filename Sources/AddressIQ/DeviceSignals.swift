@@ -27,10 +27,19 @@ enum AddressIQDeviceSignals {
     private static let installIdKey = "addressiq_install_id"
 
     /// Sections for one event's `rawPayload`.
-    static func collect(location: CLLocation?) -> [String: [String: Any]] {
+    static func collect(
+        location: CLLocation?,
+        jailbreakMarkers markers: [String] = jailbreakMarkers,
+        skipJailbreakCheckOnSimulator: Bool = true
+    ) -> [String: [String: Any]] {
         var sections: [String: [String: Any]] = [
             "device": ["isEmulator": isSimulator],
-            "security": ["isRooted": isJailbroken()],
+            "security": [
+                "isRooted": isJailbroken(
+                    markers: markers,
+                    skipOnSimulator: skipJailbreakCheckOnSimulator
+                ),
+            ],
         ]
         if let installId = installId() {
             sections["fingerprint"] = ["installId": installId]
@@ -78,13 +87,28 @@ enum AddressIQDeviceSignals {
         return nil
     }
 
-    static func isJailbroken() -> Bool {
+    /**
+     Whether any jailbreak marker is present.
+
+     `markers` and `skipOnSimulator` are injectable so this can actually be
+     exercised. The real markers are paths only a jailbroken device has, and the
+     simulator short-circuit means that on the only hardware tests run on, this
+     returns false unconditionally — so the firing path was never once observed.
+     That is precisely the blind spot that hid Android's emulator heuristic and
+     its spoofing-app check: both returned false meaning "could not look", and
+     both were silently broken for their whole lives.
+
+     Production passes nothing and behaves exactly as before.
+     */
+    static func isJailbroken(
+        markers: [String] = jailbreakMarkers,
+        skipOnSimulator: Bool = true
+    ) -> Bool {
         #if targetEnvironment(simulator)
         // The simulator ships several of these paths; reporting every simulator
         // run as jailbroken would be noise. isEmulator already covers it.
-        return false
-        #else
-        return jailbreakMarkers.contains { FileManager.default.fileExists(atPath: $0) }
+        if skipOnSimulator { return false }
         #endif
+        return markers.contains { FileManager.default.fileExists(atPath: $0) }
     }
 }
