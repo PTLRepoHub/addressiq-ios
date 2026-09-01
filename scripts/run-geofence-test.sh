@@ -49,4 +49,5 @@ xcodebuild \
   -scheme AddressIQSample \
   -destination "platform=iOS Simulator,name=${DEVICE}" \
   -only-testing:AddressIQSampleTests/GeofenceTriggerTests \
+  -only-testing:AddressIQSampleTests/MockLocationSourceTests \
   test
