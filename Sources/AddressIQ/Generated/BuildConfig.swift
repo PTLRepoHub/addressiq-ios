@@ -27,6 +27,10 @@
 // "\(cdn)/v\(widgetVersion)/iqcollect.js". Empty strings mean "no pin published
 // yet" and disable the CDN path for that deployment. Never hand-write a hash.
 enum BuildConfig {
+    /// This SDK's version, from `version.txt`. Sent as x-sdk-version and used
+    /// for the telemetry envelope, so neither can drift from the release.
+    static let sdkVersion = "0.8.0"
+
     static let stagingApiURL = "https://api-staging.addressiqpro.com"
     static let stagingIngestURL = "https://ingest-api-staging.addressiqpro.com"
     static let stagingCdnURL = "https://cdn-staging.addressiqpro.com"
