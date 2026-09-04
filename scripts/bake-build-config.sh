@@ -42,6 +42,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="Sources/AddressIQ/Generated/BuildConfig.swift"
 
+# SDK version, from version.txt — the file release-please bumps. Baked rather
+# than hardcoded in Swift so it cannot drift from the released artifact: the RN
+# SDK hardcoded its x-sdk-version and reported 0.1.0 up to release 0.10.0.
+V_SDK_VERSION="$(tr -d ' \t\r\n' < version.txt 2>/dev/null || printf '')"
+
 STRICT=0
 [ "${1:-}" = "--strict" ] && STRICT=1
 
@@ -145,6 +150,10 @@ cat > "$OUT" <<EOF
 // "\(cdn)/v\(widgetVersion)/iqcollect.js". Empty strings mean "no pin published
 // yet" and disable the CDN path for that deployment. Never hand-write a hash.
 enum BuildConfig {
+    /// This SDK's version, from \`version.txt\`. Sent as x-sdk-version and used
+    /// for the telemetry envelope, so neither can drift from the release.
+    static let sdkVersion = "$V_SDK_VERSION"
+
     static let stagingApiURL = "$V_STAGING_ADDRESSIQ_API_BASE_URL"
     static let stagingIngestURL = "$V_STAGING_ADDRESSIQ_INGEST_BASE_URL"
     static let stagingCdnURL = "$V_STAGING_ADDRESSIQ_CDN_BASE_URL"

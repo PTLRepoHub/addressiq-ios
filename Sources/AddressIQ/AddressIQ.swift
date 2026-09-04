@@ -233,6 +233,20 @@ public struct VerificationLifecycleState {
     public let pausedFor: TimeInterval?
 }
 
+extension URLRequest {
+    /// Auth plus SDK identity, on every request.
+    ///
+    /// `x-sdk-name`/`x-sdk-version` let the server tell platforms and versions
+    /// apart — without them a request from this SDK is indistinguishable from
+    /// one from Android or Flutter. The version comes from `BuildConfig`, baked
+    /// from `version.txt`, so it cannot drift from the released artifact.
+    mutating func setIdentifyingHeaders(apiKey: String) {
+        setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        setValue("addressiq-ios", forHTTPHeaderField: "x-sdk-name")
+        setValue(BuildConfig.sdkVersion, forHTTPHeaderField: "x-sdk-version")
+    }
+}
+
 public enum AddressIQError: Error, CustomStringConvertible {
     case notInitialized
     case noActiveSession
@@ -549,7 +563,7 @@ public final class AddressIQ {
         var request = URLRequest(url: config.resolvedIngestUrl.appendingPathComponent("/v1/transit-events/batch"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        request.setIdentifyingHeaders(apiKey: config.apiKey)
         request.httpBody = body.data(using: .utf8)
         // Any 2xx, not just 200. `POST /v1/transit-events/batch` is a NestJS
         // @Post and answers 201 Created, so an exact `== 200` never
@@ -616,7 +630,7 @@ public final class AddressIQ {
             var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent("/api/v1/sdk/session"))
             request.httpMethod = "DELETE"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+            request.setIdentifyingHeaders(apiKey: config.apiKey)
             let body: [String: Any] = [
                 "appUserId": user.appUserId,
                 "verificationCode": activeVerificationId as Any,
@@ -756,12 +770,20 @@ public final class AddressIQ {
         let config = try requireInitialized()
         let path = "/api/v1/providers" + (type.map { "?type=\($0)" } ?? "")
         var request = URLRequest(url: config.resolvedApiUrl.appendingPathComponent(path))
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        request.setIdentifyingHeaders(apiKey: config.apiKey)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode < 400 else {
             throw AddressIQError.http(status: (response as? HTTPURLResponse)?.statusCode ?? 0, code: nil, message: nil)
         }
-        return (try JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+        if data.isEmpty { return [] }
+        guard let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+            throw AddressIQError.http(
+                status: (response as? HTTPURLResponse)?.statusCode ?? 0,
+                code: "INVALID_RESPONSE",
+                message: "Expected a JSON array of objects"
+            )
+        }
+        return list
     }
 
     // MARK: - Permission orchestration
@@ -924,19 +946,43 @@ public final class AddressIQ {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        request.setIdentifyingHeaders(apiKey: config.apiKey)
         request.setValue(idempotencyKey ?? Self.makeIdempotencyKey(), forHTTPHeaderField: "idempotency-key")
         if let branchId { request.setValue(branchId, forHTTPHeaderField: "x-branch-id") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        // An error body that is not JSON must not mask the status it came with,
+        // so decode leniently here and strictly below.
+        let errorJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if status >= 400 {
             throw AddressIQError.http(
                 status: status,
-                code: json["code"] as? String,
-                message: json["message"] as? String
+                code: errorJSON["code"] as? String,
+                message: errorJSON["message"] as? String
+            )
+        }
+        return try Self.decodeObject(data, status: status)
+    }
+
+    /// Decodes a success body, refusing to invent an empty one.
+    ///
+    /// This used to be `(try? …) ?? [:]`, so a 200 carrying a truncated or
+    /// non-JSON body became an empty dictionary; callers then read
+    /// `json["verificationCode"] as? String ?? ""` and returned a *successful*
+    /// result with empty fields. A response we cannot read is an error, and
+    /// saying so beats handing back a verification code of "".
+    ///
+    /// An empty body stays an empty dictionary: 204-shaped endpoints (cancel)
+    /// legitimately return nothing.
+    internal static func decodeObject(_ data: Data, status: Int) throws -> [String: Any] {
+        if data.isEmpty { return [:] }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw AddressIQError.http(
+                status: status,
+                code: "INVALID_RESPONSE",
+                message: "Expected a JSON object; got \(data.count) bytes that could not be read as one"
             )
         }
         return json
