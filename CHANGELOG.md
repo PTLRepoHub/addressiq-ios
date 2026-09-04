@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.8.0...v0.8.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ios:** a response we cannot read is an error, not an empty result ([#25](https://github.com/PTLRepoHub/addressiq-ios/issues/25)) ([52ce82b](https://github.com/PTLRepoHub/addressiq-ios/commit/52ce82b16b97541055d993b827acf676d310aa66))
+
 ## [0.8.0](https://github.com/PTLRepoHub/addressiq-ios/compare/v0.7.0...v0.8.0) (2026-09-01)
 
 
